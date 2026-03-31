@@ -1,0 +1,910 @@
+const { ADMIN_ID } = require("../config");
+const { SERVICE_KEYS } = require("../constants/menu");
+const { getArray, t, getUserLang } = require("../locales");
+const { sendPlaceholderReply } = require("../services/menuService");
+const {
+  sendMainMenu,
+  sendAccountMenu,
+  sendAccountProfile,
+  sendTransactionHistory,
+  sendVipInfo,
+  sendReferralMenu,
+  sendSettingsMenu,
+  sendChannelsMenu,
+  sendPublicStats,
+  sendTransferInstructions,
+  sendAdminPanel,
+  sendServicePricesMenu,
+  sendServiceToggleMenu,
+} = require("../services/profileService");
+const {
+  sendTopupHome,
+  sendCountryTopupMenu,
+  sendStarsPrompt,
+  sendPlaceholderTopupMethod,
+  createStarsInvoice,
+} = require("../services/topupService");
+const {
+  sendVirtualNumbersMenu,
+  sendVirtualNumbersProviderMenu,
+  sendSocialBoostMenu,
+  sendSocialBoostServicesMenu,
+  sendProAccountsMenu,
+  sendProSubcategoryMenu,
+  sendSocialAccountsMenu,
+  sendSocialAccountsPlatformsMenu,
+  sendServiceSelectionPlaceholder,
+  sendCloudServicesMenu,
+  sendTemporaryEmailsMenu,
+  buildMockTempEmailSession,
+  buildTempEmailText,
+  sendTempEmailSession,
+  getMockTempEmailMessages,
+  sendVirtualVisaMenu,
+  sendGameTopupMenu,
+  sendOtherServicesMenu,
+  sendCustomServicePrompt,
+} = require("../services/serviceMenusService");
+const { sendGrizzlyCountriesMenu, sendGrizzlyCountryDetails } = require("../services/grizzlyMenuService");
+const { requestNumber, getSmsStatus, cancelNumber } = require("../services/grizzlyService");
+const { getTempEmailActionsKeyboard } = require("../keyboards/serviceMenusKeyboard");
+const { setUserState, getUserState, clearUserState } = require("../services/stateStore");
+const { safeTelegramCall } = require("../services/telegramSafe");
+const { getRecentErrors, logBotError } = require("../services/errorLogger");
+const { sendLanguageMenu } = require("./startHandler");
+const { exportUsersList } = require("./messageHandler");
+
+function resolveGrizzlyAppLabel(lang, serviceCode) {
+  const { getGrizzlyServiceCode } = require("../constants/grizzly");
+  const topApps = getArray(lang, "virtualNumbers_topApps");
+  const otherPages = getArray(lang, "virtualNumbers_otherPages");
+  const otherApps = Array.isArray(otherPages) ? otherPages.flat() : [];
+  const allApps = [...topApps, ...otherApps];
+  return allApps.find((label) => getGrizzlyServiceCode(label) === serviceCode) || serviceCode || "Grizzly";
+}
+
+function buildVerifyUrl(serviceCode, number) {
+  const normalizedNumber = String(number || "").replace(/[^\d+]/g, "");
+  if (serviceCode === "tg") {
+    return `https://t.me/+${normalizedNumber.replace(/^\+/, "")}`;
+  }
+  return `https://wa.me/${normalizedNumber.replace(/^\+/, "")}`;
+}
+
+function buildPurchaseReceipt({ number, countryData, appName, finalPriceRub, statusLine }) {
+  return `لقد تم طلب الرقم بنجاح ✅\n\nالرقم : <code>+${number}</code>\nالدولة : ${countryData.name_ar} ${countryData.flag}\nالتطبيق : ${appName} 💬\nالسعر : ${finalPriceRub}.00₽\n---------------------------\nحاله الرقم : ${statusLine}\n---------------------------\n* لديك 20 دقيقه لإلغاء الرقم قبل الحذف`;
+}
+
+async function ensureAdmin(bot, query) {
+  if (query.from.id === ADMIN_ID) {
+    return true;
+  }
+
+  await safeTelegramCall("ensureAdmin", () =>
+    bot.answerCallbackQuery(query.id, {
+      text: "❌ ليس لديك صلاحية",
+      show_alert: true,
+    })
+  );
+  return false;
+}
+
+async function handleAdminCallbacks(bot, query, appStore) {
+  try {
+    if (!(await ensureAdmin(bot, query))) {
+      return true;
+    }
+
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const services = appStore.getServices();
+
+    switch (query.data) {
+      case "admin:panel":
+        await sendAdminPanel(bot, chatId, { messageId, lang: getUserLang(appStore.findUserById(query.from.id)) });
+        return true;
+
+      case "admin:view_users": {
+        const users = appStore.getUsers();
+        const lastTen = users.slice(-10).reverse();
+        const text = [
+          "<b>=== المستخدمون ===</b>",
+          "",
+          `الإجمالي: ${users.length}`,
+          "",
+          ...lastTen.map((user) => `• <code>${user.userId}</code> | ${user.firstName || user.username || "-"}`),
+        ].join("\n");
+
+        await safeTelegramCall("handleAdminCallbacks.viewUsers", () =>
+          bot.editMessageText(text, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "📄 Export Users", callback_data: "admin:export_users" }],
+                [{ text: "رجوع", callback_data: "admin:panel" }],
+              ],
+            },
+          })
+        );
+        return true;
+      }
+
+      case "admin:export_users":
+        await exportUsersList(bot, chatId, appStore);
+        return true;
+
+      case "admin:add_balance":
+        setUserState(ADMIN_ID, "AWAITING_ADD_BALANCE_ID");
+        await safeTelegramCall("handleAdminCallbacks.addBalance", () =>
+          bot.sendMessage(chatId, "أرسل User ID أولاً. للإلغاء: Cancel")
+        );
+        return true;
+
+      case "admin:deduct_balance":
+        setUserState(ADMIN_ID, "ADMIN_AWAITING_DEDUCT_BALANCE_USER");
+        await safeTelegramCall("handleAdminCallbacks.deductBalance", () =>
+          bot.sendMessage(chatId, "أرسل User ID أولاً. للإلغاء: Cancel")
+        );
+        return true;
+
+      case "admin:broadcast":
+        setUserState(ADMIN_ID, "ADMIN_AWAITING_BROADCAST");
+        await safeTelegramCall("handleAdminCallbacks.broadcast", () =>
+          bot.sendMessage(chatId, "أرسل نص البرودكاست الآن. للإلغاء: Cancel")
+        );
+        return true;
+
+      case "admin:earnings": {
+        const stats = appStore.getEarningsStats();
+        await safeTelegramCall("handleAdminCallbacks.earnings", () =>
+          bot.editMessageText(
+            [
+              "<b>=== الأرباح ===</b>",
+              "",
+              `إجمالي الأرباح: ${stats.totalProfits} RUB`,
+              `أرباح اليوم: ${stats.todayProfits} RUB`,
+              `إجمالي عدد العمليات: ${stats.totalTransactions}`,
+            ].join("\n"),
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "admin:panel" }]] },
+            }
+          )
+        );
+        return true;
+      }
+
+      case "admin:edit_prices":
+        await sendServicePricesMenu(bot, chatId, services, { messageId });
+        return true;
+
+      case "admin:manage_services":
+        await sendServiceToggleMenu(bot, chatId, services, { messageId });
+        return true;
+
+      case "admin:upload_data":
+        setUserState(ADMIN_ID, "ADMIN_AWAITING_UPLOAD_DATA");
+        await safeTelegramCall("handleAdminCallbacks.upload", () =>
+          bot.sendMessage(chatId, "أرسل JSON أو رابط Google Sheets. هذه خطوة تمهيدية حالياً. للإلغاء: Cancel")
+        );
+        return true;
+
+      case "admin:bot_errors": {
+        const recent = getRecentErrors(5);
+        const text = recent.length
+          ? recent.map((item, index) => `${index + 1}. ${item.scope} | ${item.message}`).join("\n")
+          : "لا توجد أخطاء مسجلة.";
+        await safeTelegramCall("handleAdminCallbacks.botErrors", () =>
+          bot.editMessageText(`<b>=== آخر الأخطاء ===</b>\n\n${text}`, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "admin:panel" }]] },
+          })
+        );
+        return true;
+      }
+
+      case "admin:detailed_stats": {
+        const stats = appStore.getDetailedStats();
+        const serviceName = stats.mostUsedServiceKey
+          ? services[stats.mostUsedServiceKey]?.name || stats.mostUsedServiceKey
+          : "لا يوجد";
+        await safeTelegramCall("handleAdminCallbacks.detailedStats", () =>
+          bot.editMessageText(
+            [
+              "<b>=== Detailed Stats ===</b>",
+              "",
+              `Total users: ${stats.totalUsers}`,
+              `Total requests: ${stats.totalRequests}`,
+              `Most used service: ${serviceName}`,
+            ].join("\n"),
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "admin:panel" }]] },
+            }
+          )
+        );
+        return true;
+      }
+
+      default:
+        if (query.data.startsWith("admin:edit_price:")) {
+          const serviceKey = query.data.split(":")[2];
+          setUserState(ADMIN_ID, "ADMIN_AWAITING_SERVICE_PRICE", { serviceKey });
+          await safeTelegramCall("handleAdminCallbacks.editPricePrompt", () =>
+            bot.sendMessage(chatId, `أرسل السعر الجديد للخدمة: ${services[serviceKey]?.name || serviceKey}`)
+          );
+          return true;
+        }
+
+        if (query.data.startsWith("admin:toggle_service:")) {
+          const serviceKey = query.data.split(":")[2];
+          appStore.toggleService(serviceKey);
+          await sendServiceToggleMenu(bot, chatId, appStore.getServices(), { messageId });
+          return true;
+        }
+
+        return false;
+    }
+  } catch (error) {
+    logBotError("handleAdminCallbacks", error, { userId: query.from?.id, data: query.data });
+    return true;
+  }
+}
+
+async function handleCallbackQuery(bot, query, appStore, appContext) {
+  try {
+    if (query.data.startsWith("admin:")) {
+      return await handleAdminCallbacks(bot, query, appStore);
+    }
+
+    if (query.data.startsWith("setlang_")) {
+      return false;
+    }
+
+    await safeTelegramCall("handleCallbackQuery.answer", () => bot.answerCallbackQuery(query.id));
+    const user = appStore.getOrCreateUser(query.from);
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const proCategoryIndexMap = { ai: 0, subscriptions: 1, verification: 2 };
+    const socialCategoryLabels = getArray(getUserLang(user), "socialAccounts_categories").reduce((acc, item) => {
+      if (item && item.key) {
+        acc[item.key] = item.label;
+      }
+      return acc;
+    }, {});
+    const socialBoostKeyMap = {
+      instagram: "instagram",
+      tiktok: "tiktok",
+      youtube: "youtube",
+      telegram: "telegram",
+      facebook: "facebook",
+      twitter: "twitter",
+      snapchat: "snapchat",
+      whatsapp: "whatsapp",
+      linkedin: "linkedin",
+    };
+
+    switch (query.data) {
+      case "menu:main":
+        clearUserState(user.userId);
+        await sendMainMenu(bot, chatId, user, { messageId });
+        return true;
+
+      case "menu:account":
+        await sendAccountMenu(bot, chatId, user, { messageId });
+        return true;
+
+      case "account:vip_info":
+        await sendVipInfo(bot, chatId, user, { messageId });
+        return true;
+
+      case "account:profile":
+        await sendAccountProfile(bot, chatId, user, { messageId });
+        return true;
+
+      case "account:history":
+        await sendTransactionHistory(bot, chatId, user, appStore.getRecentTransactionsForUser(user.userId, 5), { messageId });
+        return true;
+
+      case "menu:referral":
+        await sendReferralMenu(bot, chatId, user, appContext.botUsername, { messageId });
+        return true;
+
+      case "menu:settings":
+        await sendSettingsMenu(bot, chatId, { messageId, lang: getUserLang(user) });
+        return true;
+
+      case "menu:channels":
+        await sendChannelsMenu(bot, chatId, { messageId, lang: getUserLang(user) });
+        return true;
+
+      case "menu:public_stats":
+        await sendPublicStats(bot, chatId, appStore.getPublicStats(), { messageId, lang: getUserLang(user) });
+        return true;
+
+      case "menu:change_language":
+        await sendLanguageMenu(bot, chatId, messageId);
+        return true;
+
+      case "action:transfer_balance":
+        setUserState(user.userId, "AWAITING_TRANSFER");
+        await sendTransferInstructions(bot, chatId, { messageId });
+        return true;
+
+      default:
+        if (query.data.startsWith("buynum_") || query.data.startsWith("buy_num_")) {
+          const lang = getUserLang(user);
+          const parts = query.data.split("_");
+          const isNewFormat = query.data.startsWith("buy_num_");
+          const providerKey = isNewFormat && parts.length >= 6 ? parts[2] : "server2";
+          const serviceCode = isNewFormat ? (parts.length >= 6 ? parts[3] : parts[2]) : parts[1];
+          const countryId = isNewFormat ? (parts.length >= 6 ? parts[4] : parts[3]) : parts[2];
+          const priceRaw = isNewFormat ? (parts.length >= 6 ? parts[5] : parts[4]) : parts[3];
+          const price = Number(priceRaw);
+          const countryMeta = require("../constants/grizzly").getGrizzlyCountryMeta(countryId);
+          const appName = resolveGrizzlyAppLabel(lang, serviceCode);
+
+          if (!Number.isFinite(price) || price <= 0) {
+            await safeTelegramCall("handleCallbackQuery.buyNum.invalidPrice", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: t(lang, "grizzly_no_numbers"),
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          const currentUser = appStore.findUserById(user.userId);
+          if (!currentUser || currentUser.balance < price) {
+            await safeTelegramCall("handleCallbackQuery.buyNum.insufficient", () =>
+              bot.sendMessage(chatId, t(lang, "grizzly_buy_insufficient"))
+            );
+            return true;
+          }
+
+          const response = await requestNumber(serviceCode, countryId, providerKey);
+          if (!response || /^(BAD_|ERROR)/i.test(response)) {
+            await safeTelegramCall("handleCallbackQuery.buyNum.noNumbers", () =>
+              bot.sendMessage(chatId, t(lang, "grizzly_no_numbers"))
+            );
+            return true;
+          }
+
+          if (response.includes("ACCESS_NUMBER")) {
+            const [, activationId, number] = String(response).split(":");
+            appStore.deductBalance(currentUser.userId, price);
+            appStore.addTransaction({
+              type: "virtual_number_purchase",
+              userId: currentUser.userId,
+              amount: price,
+              providerKey,
+              serviceCode,
+              countryId,
+              activationId,
+              number,
+            });
+
+            const verifyUrl = buildVerifyUrl(serviceCode, number);
+            const message = buildPurchaseReceipt({
+              number: String(number || ""),
+              countryData: countryMeta,
+              appName,
+              finalPriceRub: price,
+              statusLine: "بإنتظار وصول الكود ⏳",
+            });
+
+            const replyMarkup = {
+              inline_keyboard: [
+                [{ text: "تحديث الرسائل 🔄", callback_data: `checksms_${providerKey}_${activationId}` }],
+                [{ text: "إلغاء الرقم ❌", callback_data: `cancelnum_${providerKey}_${activationId}_${price}` }],
+                [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
+              ],
+            };
+
+            await safeTelegramCall("handleCallbackQuery.buyNum.success", () =>
+              bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "HTML",
+                reply_markup: replyMarkup,
+              })
+            );
+            return true;
+          } else if (response === "NO_NUMBERS" || response === "NO_BALANCE") {
+            await safeTelegramCall("handleCallbackQuery.buyNum.knownFailure", () =>
+              bot.sendMessage(chatId, t(lang, "grizzly_no_numbers"))
+            );
+            return true;
+          } else {
+            await safeTelegramCall("handleCallbackQuery.buyNum.unknown", () =>
+              bot.sendMessage(chatId, t(lang, "grizzly_no_numbers"))
+            );
+            return true;
+          }
+        }
+
+        if (query.data.startsWith("checksms_")) {
+          const lang = getUserLang(user);
+          const parts = query.data.split("_");
+          const providerKey = parts.length >= 3 ? parts[1] : "server2";
+          const activationId = parts.length >= 3 ? parts[2] : parts[1];
+          const status = await getSmsStatus(activationId, providerKey);
+
+          if (!status || status.startsWith("STATUS_WAIT_CODE")) {
+            await safeTelegramCall("handleCallbackQuery.checkSms.wait", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: t(lang, "grizzly_status_wait"),
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          if (status.startsWith("STATUS_OK")) {
+            const code = status.split(":")[1] || "";
+            const purchaseTx = appStore.getLatestTransactionByActivationId(activationId);
+            const serviceCode = purchaseTx?.serviceCode || "wa";
+            const countryData = require("../constants/grizzly").getGrizzlyCountryMeta(purchaseTx?.countryId);
+            const appName = resolveGrizzlyAppLabel(lang, serviceCode);
+            const verifyUrl = buildVerifyUrl(serviceCode, purchaseTx?.number || "");
+            const text = buildPurchaseReceipt({
+              number: String(purchaseTx?.number || ""),
+              countryData,
+              appName,
+              finalPriceRub: Number(purchaseTx?.amount || 0),
+              statusLine: `الكود هو <code>${String(code)}</code> ✅`,
+            });
+            await safeTelegramCall("handleCallbackQuery.checkSms.ok", () =>
+              bot.editMessageText(text, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
+                  ],
+                },
+              })
+            );
+            return true;
+          }
+
+          await safeTelegramCall("handleCallbackQuery.checkSms.unknown", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: t(lang, "grizzly_status_wait"),
+              show_alert: true,
+            })
+          );
+          return true;
+        }
+
+        if (query.data.startsWith("cancelnum_")) {
+          const lang = getUserLang(user);
+          const parts = query.data.split("_");
+          const providerKey = parts.length >= 4 ? parts[1] : "server2";
+          const activationId = parts.length >= 4 ? parts[2] : parts[1];
+          const priceRaw = parts.length >= 4 ? parts[3] : parts[2];
+          const price = Number(priceRaw);
+
+          await cancelNumber(activationId, providerKey);
+
+          if (Number.isFinite(price) && price > 0) {
+            appStore.addBalance(user.userId, price);
+            appStore.addTransaction({
+              type: "virtual_number_refund",
+              userId: user.userId,
+              amount: price,
+              providerKey,
+              activationId,
+            });
+          }
+
+          const text = t(lang, "grizzly_cancel_refund").replace("{price}", String(price || 0));
+          await safeTelegramCall("handleCallbackQuery.cancelNum.done", () =>
+            bot.editMessageText(text, {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+            })
+          );
+          return true;
+        }
+
+        if (query.data === "service:balance_topup") {
+          clearUserState(user.userId);
+          await sendTopupHome(bot, chatId, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
+        if (query.data === "service:virtual_numbers") {
+          await sendVirtualNumbersMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:social_boost") {
+          await sendSocialBoostMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:pro_accounts") {
+          await sendProAccountsMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:social_accounts") {
+          await sendSocialAccountsMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:cloud_services") {
+          await sendCloudServicesMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:temporary_emails") {
+          clearUserState(user.userId);
+          await sendTemporaryEmailsMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:virtual_visa") {
+          await sendVirtualVisaMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:game_topup") {
+          await sendGameTopupMenu(bot, chatId, user, 0, { messageId });
+          return true;
+        }
+
+        if (query.data === "service:other_services") {
+          await sendOtherServicesMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "service_menu:virtual_numbers:offers:wa" || query.data === "service_menu:virtual_numbers:offers:tg") {
+          await sendServiceSelectionPlaceholder(bot, chatId, user, "Offers", {
+            messageId,
+            backCallback: "service:virtual_numbers",
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.split(":").length === 4) {
+          const providerKey = query.data.split(":")[3];
+          await sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, 0, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.includes(":other:")) {
+          const parts = query.data.split(":");
+          const providerKey = parts[3];
+          const pageIndex = Number(parts[5]);
+          await sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, pageIndex, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.includes(":app:")) {
+          const parts = query.data.split(":");
+          const providerKey = parts[3];
+          const appName = decodeURIComponent(parts.slice(5).join(":"));
+          await sendGrizzlyCountriesMenu(bot, chatId, user, appName, 0, { messageId, providerKey });
+          return true;
+        }
+
+        if (query.data.startsWith("grizzly:")) {
+          const [, providerKey, , serviceKey, , pageRaw] = query.data.split(":");
+          const pageIndex = Number(pageRaw || 0);
+          await sendGrizzlyCountriesMenu(bot, chatId, user, serviceKey, pageIndex, { messageId, providerKey });
+          return true;
+        }
+
+        if (query.data.startsWith("grizzly:country:")) {
+          const [, , serviceKey, countryId] = query.data.split(":");
+          await sendGrizzlyCountryDetails(bot, chatId, user, serviceKey, countryId, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:social_boost:app:")) {
+          const appName = decodeURIComponent(query.data.split(":").slice(3).join(":"));
+          const normalized = appName.toLowerCase();
+          const appKey = socialBoostKeyMap[normalized] || socialBoostKeyMap[normalized.replace(/[^a-z0-9]/g, "")];
+          if (!appKey) {
+            await sendServiceSelectionPlaceholder(bot, chatId, user, appName, {
+              messageId,
+              backCallback: "service:social_boost",
+            });
+            return true;
+          }
+
+          await sendSocialBoostServicesMenu(bot, chatId, user, appKey, appName, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("social_boost_service:")) {
+          const lang = getUserLang(user);
+          await safeTelegramCall("handleCallbackQuery.socialBoostService", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: t(lang, "socialBoost_service_placeholder"),
+              show_alert: true,
+            })
+          );
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:pro_accounts:category:")) {
+          const categoryIndex = Number(query.data.split(":")[3]);
+          const categoryMap = ["ai", "subscriptions", "verification"];
+          await sendProSubcategoryMenu(bot, chatId, user, categoryMap[categoryIndex], { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:pro_accounts:item:")) {
+          const [, , , subcategoryKey, itemIndexRaw] = query.data.split(":");
+          const proMap = {
+            ai: getArray(getUserLang(user), "proAccounts_ai"),
+            subscriptions: getArray(getUserLang(user), "proAccounts_subscriptions"),
+            verification: getArray(getUserLang(user), "proAccounts_verification"),
+          };
+          const itemName = proMap[subcategoryKey]?.[Number(itemIndexRaw)];
+          if (!itemName) {
+            await sendProSubcategoryMenu(bot, chatId, user, subcategoryKey, { messageId });
+            return true;
+          }
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Pro Accounts | ${itemName}`, {
+            messageId,
+            backCallback: `service_menu:pro_accounts:category:${proCategoryIndexMap[subcategoryKey] ?? 0}`,
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:social_accounts:category:")) {
+          const categoryKey = query.data.split(":")[3];
+          await sendSocialAccountsPlatformsMenu(bot, chatId, user, categoryKey, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:social_accounts:platform:")) {
+          const [, , , categoryKey, ...platformParts] = query.data.split(":");
+          const platformName = decodeURIComponent(platformParts.join(":"));
+          const categoryTitle = socialCategoryLabels[categoryKey] || categoryKey;
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `${categoryTitle} | ${platformName}`, {
+            messageId,
+            backCallback: `service_menu:social_accounts:category:${categoryKey}`,
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:cloud_services:item:")) {
+          const itemName = getArray(getUserLang(user), "cloudServices_items")[Number(query.data.split(":")[3])];
+          if (!itemName) {
+            await sendCloudServicesMenu(bot, chatId, user, { messageId });
+            return true;
+          }
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Cloud Services | ${itemName}`, {
+            messageId,
+            backCallback: "service:cloud_services",
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:temporary_emails:item:")) {
+          const itemIndex = Number(query.data.split(":")[3]);
+          const itemName = getArray(getUserLang(user), "temporaryEmails_items")[itemIndex];
+          if (!itemName) {
+            await sendTemporaryEmailsMenu(bot, chatId, user, { messageId });
+            return true;
+          }
+
+          if (itemIndex === 0) {
+            const session = buildMockTempEmailSession();
+            setUserState(user.userId, "TEMP_EMAIL_SESSION", { ...session });
+            await sendTempEmailSession(bot, chatId, user, session, { messageId });
+            return true;
+          }
+
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Temporary Emails | ${itemName}`, {
+            messageId,
+            backCallback: "service:temporary_emails",
+          });
+          return true;
+        }
+
+        if (query.data === "service_menu:temporary_emails:refresh") {
+          const tempState = getUserState(user.userId);
+          if (!tempState || tempState.name !== "TEMP_EMAIL_SESSION") {
+            const session = buildMockTempEmailSession();
+            setUserState(user.userId, "TEMP_EMAIL_SESSION", { ...session });
+            await sendTempEmailSession(bot, chatId, user, session, { messageId });
+            return true;
+          }
+
+          const messages = getMockTempEmailMessages(tempState);
+          setUserState(user.userId, "TEMP_EMAIL_SESSION", { ...tempState });
+
+          if (!messages.length) {
+            await safeTelegramCall("handleCallbackQuery.tempEmailEmpty", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: t(getUserLang(user), "temporaryEmails_noNew"),
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          await safeTelegramCall("handleCallbackQuery.tempEmailRefresh", () =>
+              bot.editMessageText(buildTempEmailText(user, tempState, messages), {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "HTML",
+                reply_markup: getTempEmailActionsKeyboard(getUserLang(user)),
+              })
+            );
+          return true;
+        }
+
+        if (query.data === "service_menu:temporary_emails:switch") {
+          const session = buildMockTempEmailSession();
+          setUserState(user.userId, "TEMP_EMAIL_SESSION", { ...session });
+          await sendTempEmailSession(bot, chatId, user, session, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:virtual_visa:item:")) {
+          const itemName = getArray(getUserLang(user), "virtualVisa_items")[Number(query.data.split(":")[3])];
+          if (!itemName) {
+            await sendVirtualVisaMenu(bot, chatId, user, { messageId });
+            return true;
+          }
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Virtual Visa | ${itemName}`, {
+            messageId,
+            backCallback: "service:virtual_visa",
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:game_topup:page:")) {
+          const pageIndex = Number(query.data.split(":")[3]);
+          await sendGameTopupMenu(bot, chatId, user, pageIndex, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:game_topup:item:")) {
+          const [, , , pageIndexRaw, itemIndexRaw] = query.data.split(":");
+          const pageIndex = Number(pageIndexRaw);
+          const itemIndex = Number(itemIndexRaw);
+          const itemName = getArray(getUserLang(user), "games_list")[pageIndex * 10 + itemIndex];
+          if (!itemName) {
+            await sendGameTopupMenu(bot, chatId, user, 0, { messageId });
+            return true;
+          }
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Game Top-up | ${itemName}`, {
+            messageId,
+            backCallback: "service:game_topup",
+          });
+          return true;
+        }
+
+        if (query.data === "service_menu:other_services:custom_request") {
+          setUserState(user.userId, "AWAITING_CUSTOM_SERVICE");
+          await sendCustomServicePrompt(bot, chatId, user);
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:other_services:item:")) {
+          const itemName = getArray(getUserLang(user), "otherServices_items")[Number(query.data.split(":")[3])];
+          if (!itemName) {
+            await sendOtherServicesMenu(bot, chatId, user, { messageId });
+            return true;
+          }
+          await sendServiceSelectionPlaceholder(bot, chatId, user, `Other Services | ${itemName}`, {
+            messageId,
+            backCallback: "service:other_services",
+          });
+          return true;
+        }
+
+        if (query.data.startsWith("topup:country:")) {
+          const country = query.data.split(":")[2];
+          await sendCountryTopupMenu(bot, chatId, country, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
+        if (query.data === "topup:auto:stars") {
+          setUserState(user.userId, "AWAITING_TOPUP_STARS_AMOUNT");
+          await sendStarsPrompt(bot, chatId, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
+        if (query.data.startsWith("topup:stars:pay:")) {
+          const amountRub = Number(query.data.split(":")[3]);
+          if (!Number.isFinite(amountRub) || amountRub <= 0) {
+            await safeTelegramCall("handleCallbackQuery.invalidStarsAmount", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: "قيمة الشحن غير صالحة.",
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          await createStarsInvoice(bot, chatId, amountRub);
+          return true;
+        }
+
+        if (query.data.startsWith("topup:auto:") || query.data.startsWith("topup:placeholder:")) {
+          const methodMap = {
+            "topup:auto:binance": "Binance Pay",
+            "topup:auto:vodafone": "Vodafone Cash",
+            "topup:auto:jeeb": "محفظة جيب",
+            "topup:auto:crypto": "Crypto",
+            "topup:placeholder:stc_pay": "STC Pay",
+            "topup:placeholder:mobily_pay": "Mobily Pay",
+            "topup:placeholder:saudi_bank": "تحويل بنكي",
+            "topup:placeholder:saudi_local": "تحويل محلي",
+            "topup:placeholder:sabafon": "سبأفون",
+            "topup:placeholder:you": "YOU",
+            "topup:placeholder:kurimi": "كريمي",
+            "topup:placeholder:yemen_local": "تحويل محلي",
+            "topup:placeholder:egypt_vodafone": "Vodafone Cash",
+            "topup:placeholder:orange_cash": "Orange Cash",
+            "topup:placeholder:etisalat_cash": "Etisalat Cash",
+            "topup:placeholder:egypt_bank": "تحويل بنكي",
+            "topup:placeholder:payeer": "Payeer",
+            "topup:placeholder:perfect_money": "Perfect Money",
+            "topup:placeholder:global_crypto": "Crypto",
+            "topup:placeholder:webmoney": "WebMoney",
+          };
+
+          await sendPlaceholderTopupMethod(bot, chatId, methodMap[query.data] || "طريقة دفع", { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service:")) {
+          const serviceKey = query.data.split(":")[1];
+          const services = appStore.getServices();
+
+          if (!SERVICE_KEYS.includes(serviceKey) || !services[serviceKey]) {
+            await sendPlaceholderReply(bot, chatId, "قسم غير معروف", messageId);
+            return true;
+          }
+
+          if (!services[serviceKey].enabled) {
+            await safeTelegramCall("handleCallbackQuery.serviceDisabled", () =>
+              bot.editMessageText(
+                `<b>=== ${services[serviceKey].name} ===</b>\n\nهذا القسم متوقف حالياً.`,
+                {
+                  chat_id: chatId,
+                  message_id: messageId,
+                  parse_mode: "HTML",
+                  reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "menu:main" }]] },
+                }
+              )
+            );
+            return true;
+          }
+
+          await sendPlaceholderReply(bot, chatId, services[serviceKey].name, messageId);
+          return true;
+        }
+
+        return false;
+    }
+  } catch (error) {
+    logBotError("handleCallbackQuery", error, { userId: query.from?.id, data: query.data });
+    return false;
+  }
+}
+
+module.exports = {
+  handleCallbackQuery,
+};
+

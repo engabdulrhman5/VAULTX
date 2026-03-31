@@ -1,0 +1,333 @@
+[
+  {
+    "id": "1774835762133-x49xbu",
+    "createdAt": "2026-03-30T01:56:02.133Z",
+    "type": "admin_add_balance",
+    "userId": 6304459652,
+    "targetUserId": 6304459652,
+    "amount": 500
+  },
+  {
+    "id": "1774835859126-4i0dx0",
+    "createdAt": "2026-03-30T01:57:39.126Z",
+    "type": "admin_deduct_balance",
+    "userId": 6304459652,
+    "targetUserId": 6304459652,
+    "amount": 200
+  },
+  {
+    "id": "1774837887367-cea4nb",
+    "createdAt": "2026-03-30T02:31:27.367Z",
+    "type": "referral_reward",
+    "userId": 6304459652,
+    "targetUserId": 6723191936,
+    "amount": 0.2,
+    "note": "New user captcha completed"
+  },
+  {
+    "id": "1774838495733-u08gz5",
+    "createdAt": "2026-03-30T02:41:35.733Z",
+    "type": "admin_add_balance",
+    "userId": 6304459652,
+    "targetUserId": 6304459652,
+    "amount": 124000
+  },
+  {
+    "id": "1774838565032-yub8cx",
+    "createdAt": "2026-03-30T02:42:45.032Z",
+    "type": "transfer_out",
+    "userId": 6304459652,
+    "targetUserId": 6723191936,
+    "amount": 1000
+  },
+  {
+    "id": "1774838565033-grip1q",
+    "createdAt": "2026-03-30T02:42:45.033Z",
+    "type": "transfer_in",
+    "userId": 6723191936,
+    "targetUserId": 6304459652,
+    "amount": 1000
+  },
+  {
+    "id": "1774897617806-zrtbsn",
+    "createdAt": "2026-03-30T19:06:57.806Z",
+    "type": "admin_add_balance",
+    "userId": 6304459652,
+    "targetUserId": 6304459652,
+    "amount": 500
+  },
+  {
+    "id": "1774897857696-8zepsf",
+    "createdAt": "2026-03-30T19:10:57.697Z",
+    "type": "referral_reward",
+    "userId": 6304459652,
+    "targetUserId": 1317098132,
+    "amount": 0.2,
+    "note": "New user captcha completed"
+  },
+  {
+    "id": "1774897920534-vngr24",
+    "createdAt": "2026-03-30T19:12:00.534Z",
+    "type": "transfer_out",
+    "userId": 6304459652,
+    "targetUserId": 1317098132,
+    "amount": 100
+  },
+  {
+    "id": "1774897920537-uzkdgf",
+    "createdAt": "2026-03-30T19:12:00.537Z",
+    "type": "transfer_in",
+    "userId": 1317098132,
+    "targetUserId": 6304459652,
+    "amount": 100
+  },
+  {
+    "id": "1774898235387-35wp4x",
+    "createdAt": "2026-03-30T19:17:15.387Z",
+    "type": "admin_deduct_balance",
+    "userId": 6304459652,
+    "targetUserId": 1317098132,
+    "amount": 100
+  },
+  {
+    "id": "1774916140396-1w61bg",
+    "createdAt": "2026-03-31T00:15:40.396Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 0.56,
+    "serviceCode": "wa",
+    "countryId": "5",
+    "activationId": "479919374"
+  },
+  {
+    "id": "1774916151037-6vszu1",
+    "createdAt": "2026-03-31T00:15:51.037Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 0.56,
+    "activationId": "479919374"
+  },
+  {
+    "id": "1774916900958-xa7smp",
+    "createdAt": "2026-03-31T00:28:20.959Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 1.38,
+    "serviceCode": "wa",
+    "countryId": "83",
+    "activationId": "479922019"
+  },
+  {
+    "id": "1774916913059-etmoyp",
+    "createdAt": "2026-03-31T00:28:33.059Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 1.38,
+    "activationId": "479922019"
+  },
+  {
+    "id": "1774917237636-ao0ady",
+    "createdAt": "2026-03-31T00:33:57.636Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 16,
+    "serviceCode": "wa",
+    "countryId": "1",
+    "activationId": "479923279"
+  },
+  {
+    "id": "1774917279095-hjwj3j",
+    "createdAt": "2026-03-31T00:34:39.095Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 7,
+    "serviceCode": "wa",
+    "countryId": "33",
+    "activationId": "479923387"
+  },
+  {
+    "id": "1774918335954-d7rmpx",
+    "createdAt": "2026-03-31T00:52:15.954Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479927072"
+  },
+  {
+    "id": "1774918386478-pb074o",
+    "createdAt": "2026-03-31T00:53:06.478Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479927072"
+  },
+  {
+    "id": "1774918591353-z4wgre",
+    "createdAt": "2026-03-31T00:56:31.353Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479927895"
+  },
+  {
+    "id": "1774919124483-oql5fl",
+    "createdAt": "2026-03-31T01:05:24.483Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479927895"
+  },
+  {
+    "id": "1774919839043-a18iio",
+    "createdAt": "2026-03-31T01:17:19.043Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 18,
+    "serviceCode": "wa",
+    "countryId": "53",
+    "activationId": "479932192"
+  },
+  {
+    "id": "1774920832197-63qcre",
+    "createdAt": "2026-03-31T01:33:52.197Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 3,
+    "serviceCode": "fb",
+    "countryId": "53",
+    "activationId": "479935606",
+    "number": "966506891244"
+  },
+  {
+    "id": "1774921714491-8iybtd",
+    "createdAt": "2026-03-31T01:48:34.491Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 7,
+    "activationId": "479938524"
+  },
+  {
+    "id": "1774921715068-qry7bn",
+    "createdAt": "2026-03-31T01:48:35.068Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 7,
+    "serviceCode": "tg",
+    "countryId": "8",
+    "activationId": "479938545",
+    "number": "254771998186",
+    "countryLabel": "كينيا 🇰🇪"
+  },
+  {
+    "id": "1774921810872-e0m7zm",
+    "createdAt": "2026-03-31T01:50:10.872Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 7,
+    "activationId": "479938545"
+  },
+  {
+    "id": "1774921902322-xkeezr",
+    "createdAt": "2026-03-31T01:51:42.322Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 7,
+    "activationId": "479938886"
+  },
+  {
+    "id": "1774921936003-57oe2c",
+    "createdAt": "2026-03-31T01:52:16.003Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479939277",
+    "number": "84936459438",
+    "countryLabel": "فيتنام 🇻🇳"
+  },
+  {
+    "id": "1774921994192-wevfac",
+    "createdAt": "2026-03-31T01:53:14.192Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479939277"
+  },
+  {
+    "id": "1774921995360-ho4tej",
+    "createdAt": "2026-03-31T01:53:15.360Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479939489",
+    "number": "84786474453",
+    "countryLabel": "فيتنام 🇻🇳"
+  },
+  {
+    "id": "1774922000146-u6w3lm",
+    "createdAt": "2026-03-31T01:53:20.146Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479939489"
+  },
+  {
+    "id": "1774922001181-6o4gwe",
+    "createdAt": "2026-03-31T01:53:21.181Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479939509",
+    "number": "84935901206",
+    "countryLabel": "فيتنام 🇻🇳"
+  },
+  {
+    "id": "1774922165853-6znrtd",
+    "createdAt": "2026-03-31T01:56:05.853Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479939509"
+  },
+  {
+    "id": "1774922167447-zuu7fi",
+    "createdAt": "2026-03-31T01:56:07.447Z",
+    "type": "virtual_number_purchase",
+    "userId": 6304459652,
+    "amount": 6,
+    "serviceCode": "wa",
+    "countryId": "10",
+    "activationId": "479940048",
+    "number": "84788122994",
+    "countryLabel": "فيتنام 🇻🇳"
+  },
+  {
+    "id": "1774922385891-2zx349",
+    "createdAt": "2026-03-31T01:59:45.891Z",
+    "type": "virtual_number_purchase",
+    "userId": 6723191936,
+    "amount": 18,
+    "serviceCode": "tg",
+    "countryId": "53",
+    "activationId": "479940767",
+    "number": "966577729280",
+    "countryLabel": "السعودية 🇸🇦"
+  },
+  {
+    "id": "1774923102099-98s3rn",
+    "createdAt": "2026-03-31T02:11:42.099Z",
+    "type": "virtual_number_refund",
+    "userId": 6304459652,
+    "amount": 6,
+    "activationId": "479940048"
+  }
+]
