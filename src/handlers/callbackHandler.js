@@ -798,8 +798,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         if (query.data.startsWith("gt:cat:")) {
           const parts = query.data.split(":");
           const categoryKey = String(parts[2] || "");
-          const pageIndex = Number(parts[3] || 0);
-          await sendGameTopupGamesMenu(bot, chatId, user, categoryKey, pageIndex, { messageId });
+          await sendGameTopupGamesMenu(bot, chatId, user, categoryKey, { messageId });
           return true;
         }
 
@@ -807,8 +806,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const parts = query.data.split(":");
           const gameKey = String(parts[2] || "");
           const categoryKey = String(parts[3] || "");
-          const pageIndex = Number(parts[4] || 0);
-          await sendGameTopupPackagesMenu(bot, chatId, user, gameKey, categoryKey, pageIndex, { messageId });
+          await sendGameTopupPackagesMenu(bot, chatId, user, gameKey, categoryKey, { messageId });
           return true;
         }
 
@@ -817,12 +815,10 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const gameKey = String(parts[2] || "");
           const packageIndex = Number(parts[3] || 0);
           const categoryKey = String(parts[4] || "");
-          const pageIndex = Number(parts[5] || 0);
           await startGameTopupIdInput(bot, chatId, user, {
             gameKey,
             packageIndex,
             categoryKey,
-            pageIndex,
             isCustom: false,
           }, { messageId });
           return true;
@@ -832,11 +828,9 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const parts = query.data.split(":");
           const gameKey = String(parts[2] || "");
           const categoryKey = String(parts[3] || "");
-          const pageIndex = Number(parts[4] || 0);
           await startGameTopupIdInput(bot, chatId, user, {
             gameKey,
             categoryKey,
-            pageIndex,
             isCustom: true,
           }, { messageId });
           return true;
