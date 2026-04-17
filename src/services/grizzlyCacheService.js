@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 const { logBotError } = require("./errorLogger");
 const { grizzlyCountries } = require("../constants/grizzly");
+const { getSmsProvider } = require("../constants/smsProviders");
+const { getAxiosNetworkOptions } = require("../utils/network");
 
 const CACHE_FILE_PATH = path.resolve(__dirname, "../pricesCache.json");
 
@@ -29,19 +32,20 @@ function writeCacheFile(data) {
 
 async function fetchAndCachePrices() {
   try {
-    const apiKey = process.env.GRIZZLY_API_KEY;
-    if (!apiKey) {
+    const provider = getSmsProvider("server2");
+    const apiKey = provider.apiKey;
+    if (!apiKey || !provider.baseUrl) {
       throw new Error("Missing GRIZZLY_API_KEY");
     }
 
-    const url = `https://api.grizzlysms.com/stubs/handler_api.php?api_key=${encodeURIComponent(apiKey)}&action=getPrices`;
-    const response = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
-
-    if (!response.ok) {
-      throw new Error(`Grizzly API HTTP ${response.status}`);
-    }
-
-    const payload = await response.json();
+    const url = `${provider.baseUrl}?api_key=${encodeURIComponent(apiKey)}&action=getPrices`;
+    const response = await axios.get(url, {
+      timeout: 20000,
+      headers: { Accept: "application/json,text/plain;q=0.9,*/*;q=0.8" },
+      ...getAxiosNetworkOptions(String(process.env.GRIZZLY_PROXY_URL || process.env.SMS_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim()),
+    });
+    const raw = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
+    const payload = JSON.parse(String(raw || "{}"));
     const result = {};
 
     const serviceCode = "wa";

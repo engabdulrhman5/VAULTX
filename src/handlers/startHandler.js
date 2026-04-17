@@ -139,6 +139,33 @@ async function handleStart(bot, msg, appStore) {
       return;
     }
 
+    if (payload && payload.startsWith("vn_buy_")) {
+      const parts = payload.split("_");
+      if (parts.length >= 5) {
+        const serverKey = parts[2];
+        const appKey = parts[3];
+        const countryId = parts.slice(4).join("_");
+        const lang = getUserLang(user);
+        await safeTelegramCall("handleStart.vnBuyPayload", () =>
+          bot.sendMessage(
+            msg.chat.id,
+            lang === "ar"
+              ? "⚡ تم فتح الطلب من قناة التفعيلات\nاضغط للمتابعة بنفس السيرفر."
+              : "⚡ Request opened from activations channel.\nTap to continue with the same server.",
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: lang === "ar" ? "🧩 متابعة الشراء" : "🧩 Continue Purchase", callback_data: `vnm:country:${serverKey}:${appKey}:${countryId}:0` }],
+                  [{ text: t(lang, "common_back_main"), callback_data: "menu:main" }],
+                ],
+              },
+            }
+          )
+        );
+        return;
+      }
+    }
+
     clearUserState(user.userId);
     await sendMainMenu(bot, msg.chat.id, user);
   } catch (error) {

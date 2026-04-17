@@ -1,10 +1,13 @@
-const {
+﻿const {
   getVirtualNumbersKeyboard,
+  getVirtualNumbersServerSelectionKeyboard,
   getVirtualNumbersProviderAppsKeyboard,
   getVirtualNumbersCountriesKeyboard,
   getVirtualNumberCountryDetailsKeyboard,
-  getSocialBoostKeyboard,
+  getSocialBoostPlatformsKeyboard,
+  getSocialBoostCategoriesKeyboard,
   getSocialBoostServicesKeyboard,
+  getSocialBoostServiceDetailsKeyboard,
   getProMainKeyboard,
   getProSubcategoryKeyboard,
   getSocialAccountsCategoriesKeyboard,
@@ -19,13 +22,58 @@ const {
 const { sendOrEditMessage } = require("./profileService");
 const { safeTelegramCall } = require("./telegramSafe");
 const { logBotError } = require("./errorLogger");
-const { getGrizzlyVirtualNumberCatalog, paginateVirtualNumberCountries } = require("./grizzlyService");
+const { getGrizzlyVirtualNumberCatalog, paginateVirtualNumberCountries, getServicePrices, extractPrice } = require("./grizzlyService");
+const { getCachedSmmServiceById, createSmmOrder } = require("./smmCacheService");
+const { smmServices, getPlatform, getCategory, getServiceInfo } = require("../constants/smmServices");
 const { getUserLang, getArray, t } = require("../locales");
-const { escapeHtml } = require("../utils/formatters");
+const { escapeHtml, formatRuble } = require("../utils/formatters");
+const { getUserState, setUserState, clearUserState } = require("./stateStore");
 
 async function sendVirtualNumbersMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
   return sendOrEditMessage(bot, chatId, t(lang, "virtualNumbers_inst"), getVirtualNumbersKeyboard(lang), options.messageId, "sendVirtualNumbersMenu");
+}
+
+async function sendVirtualNumbersServerSelectionMenu(bot, chatId, user, appName, options = {}) {
+  const lang = getUserLang(user);
+  const text = [`📱 <b>${t(lang, "virtualNumbers_choose_server_title")}</b>`, "", `${t(lang, "virtualNumbers_selected_app_label")} <b>${escapeHtml(appName)}</b>`].join("\n");
+  return sendOrEditMessage(bot, chatId, text, getVirtualNumbersServerSelectionKeyboard(appName, lang), options.messageId, "sendVirtualNumbersServerSelectionMenu");
+}
+
+async function sendVirtualNumbersOffersMenu(bot, chatId, user, offerKey, options = {}) {
+  const lang = getUserLang(user);
+  const appName = offerKey === "wa" ? "WhatsApp" : "Telegram";
+  const serviceCode = require("../constants/grizzly").getGrizzlyServiceCode(appName);
+  if (!serviceCode) {
+    return sendOrEditMessage(bot, chatId, t(lang, "virtualNumbers_offer_error"), { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersOffersMenu.error");
+  }
+
+  const providerKeys = ["server1", "server2"];
+  const entries = [];
+
+  await Promise.all(providerKeys.map(async (providerKey) => {
+    const prices = await getServicePrices(serviceCode, providerKey);
+    if (!prices || typeof prices !== "object") return;
+
+    Object.keys(prices).forEach((countryId) => {
+      const apiPrice = extractPrice(prices, countryId, serviceCode);
+      if (!Number.isFinite(apiPrice) || apiPrice <= 0) return;
+
+      const finalPrice = Math.ceil(parseFloat(apiPrice) * 25 * 1.2);
+      const countryData = require("../constants/grizzly").getGrizzlyCountryMeta(countryId);
+      entries.push({
+        providerKey,
+        countryId,
+        countryName: lang === "ar" ? countryData.name_ar : t(lang, `grizzly_country_${countryId}`) || countryData.name_ar,
+        flag: countryData.flag,
+        finalPrice,
+      });
+    });
+  }));
+
+  const cheapest = entries.sort((a, b) => a.finalPrice - b.finalPrice).slice(0, 6);
+  const text = [`📈 <b>${t(lang, "virtualNumbers_offers_title").replace("{app}", appName)}</b>`, "", ...cheapest.map((item) => `${item.flag} ${item.countryName} — ${item.finalPrice} RUB — ${t(lang, item.providerKey === "server1" ? "virtualNumbers_server1" : "virtualNumbers_server2")}`)].join("\n");
+  return sendOrEditMessage(bot, chatId, text || t(lang, "virtualNumbers_offer_empty"), { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersOffersMenu");
 }
 
 async function sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, pageIndex, options = {}) {
@@ -35,64 +83,37 @@ async function sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, pa
   const safeIndex = Math.max(0, Math.min(pageIndex, pages.length - 1));
   const providerLabel = providerKey === "server1" ? t(lang, "virtualNumbers_server1") : t(lang, "virtualNumbers_server2");
   const text = `${t(lang, "virtualNumbers_inst")}\n\n${providerLabel}\n${safeIndex + 1}/${pages.length}`;
-  return sendOrEditMessage(
-    bot,
-    chatId,
-    text,
-    getVirtualNumbersProviderAppsKeyboard(pages[safeIndex] || [], providerKey, safeIndex, pages.length, lang),
-    options.messageId,
-    "sendVirtualNumbersProviderMenu"
-  );
+  return sendOrEditMessage(bot, chatId, text, getVirtualNumbersProviderAppsKeyboard(pages[safeIndex] || [], providerKey, safeIndex, pages.length, lang), options.messageId, "sendVirtualNumbersProviderMenu");
 }
 
 function buildVirtualNumbersCountriesText(lang, appName, countriesPage) {
-  const title = lang === "ar" ? "أسعار الأرقام المتاحة" : "Available number prices";
   const lines = [
-    `📱 <b>${title}</b>`,
+    `📱 <b>${t(lang, "grizzly_available_prices_title")}</b>`,
     "",
-    `${lang === "ar" ? "التطبيق" : "App"}: <b>${escapeHtml(appName)}</b>`,
-    `${lang === "ar" ? "الصفحة" : "Page"}: ${countriesPage.pageIndex + 1}/${countriesPage.totalPages}`,
-    `${lang === "ar" ? "عدد الدول" : "Countries"}: ${countriesPage.totalItems}`,
+    `${t(lang, "grizzly_label_app")} : <b>${escapeHtml(appName)}</b>`,
+    `${t(lang, "grizzly_label_page")} : ${countriesPage.pageIndex + 1}/${countriesPage.totalPages}`,
+    `${t(lang, "grizzly_label_countries")} : ${countriesPage.totalItems}`,
   ];
 
   if (countriesPage.items.length) {
-    lines.push("", lang === "ar" ? "اختر الدولة لعرض السعر والتوفر:" : "Select a country to view pricing and stock:");
+    lines.push("", t(lang, "grizzly_label_select_country"));
   }
 
   return lines.join("\n");
 }
 
 function buildVirtualNumberCountryDetailsText(lang, appName, country) {
-  const labels = lang === "ar"
-    ? {
-        title: "تفاصيل الرقم الوهمي",
-        app: "التطبيق",
-        country: "الدولة",
-        stock: "الكمية المتاحة",
-        supplier: "سعر Grizzly",
-        finalPrice: "سعر البيع",
-        note: "يمكنك الآن متابعة ربط خطوة الشراء الفعلية فوق هذه البيانات.",
-      }
-    : {
-        title: "Virtual number details",
-        app: "App",
-        country: "Country",
-        stock: "Available stock",
-        supplier: "Grizzly price",
-        finalPrice: "Selling price",
-        note: "You can connect the purchase step on top of this pricing block next.",
-      };
-
+  const countryLabel = lang === "ar" ? country.name_ar : t(lang, `grizzly_country_${country.id}`) || country.name_ar;
   return [
-    `📱 <b>${labels.title}</b>`,
+    `📱 <b>${t(lang, "grizzly_selected_title")}</b>`,
     "",
-    `${labels.app}: <b>${escapeHtml(appName)}</b>`,
-    `${labels.country}: ${country.flag} ${escapeHtml(country.name_ar)}`,
-    `${labels.stock}: <b>${country.availableCount}</b>`,
-    `${labels.supplier}: <code>${country.supplierPrice} RUB</code>`,
-    `${labels.finalPrice}: <code>${country.sellPrice} RUB</code>`,
+    `${t(lang, "grizzly_service_label")} : <b>${escapeHtml(appName)}</b>`,
+    `${t(lang, "grizzly_label_country")} : ${country.flag} ${escapeHtml(countryLabel)}`,
+    `${t(lang, "grizzly_label_stock")} : <b>${country.availableCount}</b>`,
+    `${t(lang, "grizzly_label_supplier")} : <code>${country.supplierPrice} RUB</code>`,
+    `${t(lang, "grizzly_label_final_price")} : <code>${country.sellPrice} RUB</code>`,
     "",
-    labels.note,
+    t(lang, "grizzly_selected_note"),
   ].join("\n");
 }
 
@@ -100,60 +121,30 @@ async function sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageI
   const lang = getUserLang(user);
 
   try {
-    const catalog = await getGrizzlyVirtualNumberCatalog(appName, {
-      baseMarkup: options.baseMarkup,
-    });
+    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup });
 
     if (!catalog.serviceCode) {
       const unsupportedText = lang === "ar"
         ? `📱 <b>Grizzly SMS</b>\n\nالتطبيق <b>${escapeHtml(appName)}</b> غير مدعوم حالياً ضمن خريطة الخدمات الحالية.`
         : `📱 <b>Grizzly SMS</b>\n\nThe app <b>${escapeHtml(appName)}</b> is not currently mapped to a Grizzly service code.`;
-      return sendOrEditMessage(
-        bot,
-        chatId,
-        unsupportedText,
-        { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] },
-        options.messageId,
-        "sendVirtualNumbersCountriesMenu.unsupported"
-      );
+      return sendOrEditMessage(bot, chatId, unsupportedText, { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersCountriesMenu.unsupported");
     }
 
     if (!catalog.countries.length) {
       const emptyText = lang === "ar"
         ? `📱 <b>${escapeHtml(appName)}</b>\n\nلا توجد أسعار متاحة حالياً من Grizzly لهذا التطبيق.`
         : `📱 <b>${escapeHtml(appName)}</b>\n\nThere are no currently available Grizzly prices for this app.`;
-      return sendOrEditMessage(
-        bot,
-        chatId,
-        emptyText,
-        { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] },
-        options.messageId,
-        "sendVirtualNumbersCountriesMenu.empty"
-      );
+      return sendOrEditMessage(bot, chatId, emptyText, { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersCountriesMenu.empty");
     }
 
     const countriesPage = paginateVirtualNumberCountries(catalog.countries, pageIndex);
-    return sendOrEditMessage(
-      bot,
-      chatId,
-      buildVirtualNumbersCountriesText(lang, appName, countriesPage),
-      getVirtualNumbersCountriesKeyboard(appName, countriesPage.items, countriesPage.pageIndex, countriesPage.totalPages, lang),
-      options.messageId,
-      "sendVirtualNumbersCountriesMenu"
-    );
+    return sendOrEditMessage(bot, chatId, buildVirtualNumbersCountriesText(lang, appName, countriesPage), getVirtualNumbersCountriesKeyboard(appName, countriesPage.items, countriesPage.pageIndex, countriesPage.totalPages, lang), options.messageId, "sendVirtualNumbersCountriesMenu");
   } catch (error) {
     logBotError("sendVirtualNumbersCountriesMenu", error, { appName, userId: user?.userId });
     const errorText = lang === "ar"
       ? "تعذر جلب الأسعار من Grizzly حالياً. حاول مرة أخرى بعد قليل."
       : "Failed to load Grizzly prices right now. Please try again shortly.";
-    return sendOrEditMessage(
-      bot,
-      chatId,
-      errorText,
-      { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] },
-      options.messageId,
-      "sendVirtualNumbersCountriesMenu.error"
-    );
+    return sendOrEditMessage(bot, chatId, errorText, { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersCountriesMenu.error");
   }
 }
 
@@ -161,86 +152,514 @@ async function sendVirtualNumberCountryDetails(bot, chatId, user, appName, count
   const lang = getUserLang(user);
 
   try {
-    const catalog = await getGrizzlyVirtualNumberCatalog(appName, {
-      baseMarkup: options.baseMarkup,
-    });
+    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup });
     const country = catalog.countries.find((item) => item.id === String(countryId));
 
     if (!country) {
       return sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageIndex, options);
     }
 
-    return sendOrEditMessage(
-      bot,
-      chatId,
-      buildVirtualNumberCountryDetailsText(lang, appName, country),
-      getVirtualNumberCountryDetailsKeyboard(appName, country.id, pageIndex, lang),
-      options.messageId,
-      "sendVirtualNumberCountryDetails"
-    );
+    return sendOrEditMessage(bot, chatId, buildVirtualNumberCountryDetailsText(lang, appName, country), getVirtualNumberCountryDetailsKeyboard(appName, country.id, pageIndex, lang), options.messageId, "sendVirtualNumberCountryDetails");
   } catch (error) {
     logBotError("sendVirtualNumberCountryDetails", error, { appName, countryId, userId: user?.userId });
     return sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageIndex, options);
   }
 }
 
-async function sendSocialBoostMenu(bot, chatId, user, options = {}) {
-  const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "socialBoost_inst"), getSocialBoostKeyboard(getArray(lang, "socialBoost_apps"), lang), options.messageId, "sendSocialBoostMenu");
+function getSocialBoostLabel(lang, item) {
+  return lang === "ar" ? item.label_ar : item.label_en;
 }
 
-async function sendSocialBoostServicesMenu(bot, chatId, user, appKey, appLabel, options = {}) {
+function getSocialBoostServiceName(lang, serviceInfo, cached) {
+  return lang === "ar" ? cached?.nameAr || serviceInfo.service.name_ar : cached?.nameEn || serviceInfo.service.name_en;
+}
+
+function getSocialBoostFallback(lang, key) {
+  if (key === "socialBoost_drop_default") return "0%";
+  return lang === "ar" ? "غير معروف" : "Unknown";
+}
+
+function getSocialBoostMetricValue(lang, value, fallbackKey = "socialBoost_unknown") {
+  if (value === null || value === undefined || value === "") return getSocialBoostFallback(lang, fallbackKey);
+  return String(value);
+}
+
+function getSocialBoostQuality(lang, cached) {
+  const mapAr = { high: "عالية", medium: "متوسطة", low: "منخفضة", fast: "سريعة" };
+  const mapEn = { high: "High", medium: "Medium", low: "Low", fast: "Fast" };
+  const map = lang === "ar" ? mapAr : mapEn;
+  return map[cached?.quality] || map.medium;
+}
+
+function getSocialBoostRefill(lang, cached) {
+  const yes = lang === "ar" ? "متاح" : "Available";
+  const no = lang === "ar" ? "غير متاح" : "Unavailable";
+  if (cached?.refill === true) return yes;
+  if (cached?.refill === false) return no;
+  if (cached?.refillStatus === "available") return yes;
+  if (cached?.refillStatus === "unavailable") return no;
+  return getSocialBoostMetricValue(lang, cached?.refillStatus);
+}
+
+function buildSocialBoostPlatformsText(lang) {
+  if (lang === "ar") {
+    return [
+      "🔴 خدمة الرشق لجميع منصات التواصل الاجتماعي",
+      "•────────────•",
+      "✅ تساعدك في زيادة متابعين وتفاعلات صفحتك",
+      "✅ خدمات متابعين، لايكات، مشاهدات",
+      "✅ أسعار مناسبة وتفاوت حسب الجودة والسرعة",
+      "•────────────•",
+      "“ 🧑‍🎤 الرجاء اختيار البرنامج المراد الرشق منه: 🔴 ”",
+    ].join("\n");
+  }
+  return [
+    "🔴 Boost service for all social platforms",
+    "•────────────•",
+    "✅ Grow followers and engagement quickly",
+    "✅ Followers, likes and views services",
+    "✅ Fair pricing by quality and speed",
+    "•────────────•",
+    "“ 🧑‍🎤 Choose the app you want to boost: 🔴 ”",
+  ].join("\n");
+}
+
+function buildSocialBoostCategoriesText(lang, platform) {
+  const platformLabel = getSocialBoostLabel(lang, platform);
+  if (lang === "ar") {
+    return [
+      `✅ اهلا بك في قسم الرشق الخاص بـ ${platformLabel}`,
+      "",
+      "” اختر الخدمة التي تريدها عبر الأزرار بالأسفل ⬇️ ”",
+    ].join("\n");
+  }
+  return [
+    `✅ Welcome to ${platformLabel} boost section`,
+    "",
+    "” Choose the service you need from buttons below ⬇️ ”",
+  ].join("\n");
+}
+
+function buildSocialBoostServicesText(lang, platform, category) {
+  if (lang === "ar") {
+    return [
+      `• ${getSocialBoostLabel(lang, category)} ${getSocialBoostLabel(lang, platform)} ✅`,
+      "",
+      "🔥 يرجى اختيار نوع الرشق من الأسفل ⬇️",
+    ].join("\n");
+  }
+  return [
+    `• ${getSocialBoostLabel(lang, platform)} ${getSocialBoostLabel(lang, category)} ✅`,
+    "",
+    "🔥 Please choose boost type from below ⬇️",
+  ].join("\n");
+}
+
+function buildSocialBoostDetailText(lang, serviceName, accountHint) {
+  return [
+    lang === "ar"
+      ? `🎬 نوع الرشق : ${escapeHtml(serviceName)}`
+      : `🎬 Boost type : ${escapeHtml(serviceName)}`,
+    "",
+    lang === "ar" ? "🔴 أدخل رابط حسابك وتأكد أنه عام" : "🔴 Send public account link",
+    "",
+    lang === "ar" ? `🔗 يرجى إرسال رابط حسابك ${accountHint}` : `🔗 Please send your link ${accountHint}`,
+  ].join("\n");
+}
+
+async function sendSocialBoostMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const services = getArray(lang, `socialBoost_services_${appKey}`);
-  if (!services.length) {
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildSocialBoostPlatformsText(lang),
+    getSocialBoostPlatformsKeyboard(smmServices, lang),
+    options.messageId,
+    "sendSocialBoostMenu"
+  );
+}
+
+async function sendSocialBoostCategoriesMenu(bot, chatId, user, platformKey, options = {}) {
+  const lang = getUserLang(user);
+  const platform = getPlatform(platformKey);
+
+  if (!platform) {
+    return sendOrEditMessage(bot, chatId, t(lang, "smm_invalid_platform"), { inline_keyboard: [[{ text: t(lang, "socialBoost_btn_back"), callback_data: "service:social_boost" }]] }, options.messageId, "sendSocialBoostCategoriesMenu.error");
+  }
+
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildSocialBoostCategoriesText(lang, platform),
+    getSocialBoostCategoriesKeyboard(platform, lang),
+    options.messageId,
+    "sendSocialBoostCategoriesMenu"
+  );
+}
+
+async function sendSocialBoostServicesMenu(bot, chatId, user, platformKey, categoryKey, options = {}) {
+  const lang = getUserLang(user);
+  const platform = getPlatform(platformKey);
+  const category = getCategory(platformKey, categoryKey);
+
+  if (!platform || !category) {
+    return sendOrEditMessage(bot, chatId, t(lang, "smm_invalid_category"), { inline_keyboard: [[{ text: t(lang, "socialBoost_btn_back"), callback_data: `service_menu:social_boost:platform:${platformKey}` }]] }, options.messageId, "sendSocialBoostServicesMenu.error");
+  }
+
+  const serviceButtons = category.services.map((service) => {
+    const serviceInfo = getServiceInfo(service.id);
+    const cached = getCachedSmmServiceById(service.id);
+    if (!serviceInfo || !cached) return null;
+
+    const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
+    const unitPrice = cached.pricePerUnitRubFormatted || (Number.isFinite(cached.pricePerUnitRub) ? Number(cached.pricePerUnitRub).toFixed(4) : null);
+    if (!unitPrice) return null;
+
+    return {
+      text: `🟢 ${serviceName} < ( ${unitPrice} ₽ )`,
+      callback_data: `service_menu:social_boost:service:${platformKey}:${categoryKey}:${service.id}`,
+    };
+  }).filter(Boolean);
+
+  if (!serviceButtons.length) {
+    const emptyText = lang === "ar"
+      ? "لا توجد خدمات مضافة لهذه الفئة بعد.\nيمكنك إضافتها لاحقًا من المزود."
+      : "No services are configured for this category yet.\nYou can add them later.";
     return sendOrEditMessage(
       bot,
       chatId,
-      t(lang, "socialBoost_service_placeholder"),
-      { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:social_boost" }]] },
+      emptyText,
+      {
+        inline_keyboard: [
+          [{ text: lang === "ar" ? "• ✖ رجوع •" : "• ✖ Back •", callback_data: `service_menu:social_boost:platform:${platformKey}` }],
+          [{ text: lang === "ar" ? "• 🏠 الصفحة الرئيسية •" : "• 🏠 Main Page •", callback_data: "menu:main" }],
+        ],
+      },
       options.messageId,
       "sendSocialBoostServicesMenu.empty"
     );
   }
 
-  const header = t(lang, "socialBoost_service_header").replace("{app}", appLabel);
+  return sendOrEditMessage(bot, chatId, buildSocialBoostServicesText(lang, platform, category), getSocialBoostServicesKeyboard(serviceButtons, platformKey, categoryKey, lang), options.messageId, "sendSocialBoostServicesMenu");
+}
+
+async function sendSocialBoostServiceDetails(bot, chatId, user, platformKey, categoryKey, serviceId, options = {}) {
+  const lang = getUserLang(user);
+  const serviceInfo = getServiceInfo(serviceId);
+  const cached = getCachedSmmServiceById(serviceId);
+
+  if (!serviceInfo || !cached) {
+    return sendOrEditMessage(bot, chatId, t(lang, "smm_service_not_found"), { inline_keyboard: [[{ text: t(lang, "socialBoost_btn_back"), callback_data: `service_menu:social_boost:category:${platformKey}:${categoryKey}` }]] }, options.messageId, "sendSocialBoostServiceDetails.error");
+  }
+
+  const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
+  const pricePer1000 = cached.pricePer1000RubFormatted
+    || (Number.isFinite(cached.pricePer1000Rub) ? Number(cached.pricePer1000Rub).toFixed(4) : getSocialBoostFallback(lang, "socialBoost_unknown"));
+  const accountHint = lang === "ar" ? "🔗" : "🔗";
+  const detailRows = [
+    { label: lang === "ar" ? "💰 - السعر / 1k :" : "💰 - Price / 1k :", value: `${pricePer1000}` },
+    { label: lang === "ar" ? "🚀 - السرعة :" : "🚀 - Speed :", value: getSocialBoostMetricValue(lang, cached.speed) },
+    { label: lang === "ar" ? "🏁 - التعبئة :" : "🏁 - Refill :", value: getSocialBoostRefill(lang, cached) },
+    { label: lang === "ar" ? "🛡 - الجودة :" : "🛡 - Quality :", value: getSocialBoostQuality(lang, cached) },
+    { label: lang === "ar" ? "🌀 - النزول :" : "🌀 - Drop :", value: getSocialBoostMetricValue(lang, cached.dropRate, "socialBoost_drop_default") },
+    { label: lang === "ar" ? "📍 - الحد الأدنى :" : "📍 - Min :", value: getSocialBoostMetricValue(lang, cached.min) },
+    { label: lang === "ar" ? "🟢 - الحد الأقصى :" : "🟢 - Max :", value: getSocialBoostMetricValue(lang, cached.max) },
+    { label: lang === "ar" ? "⏰ - الوقت :" : "⏰ - Time :", value: getSocialBoostMetricValue(lang, cached.startTime) },
+  ];
+
+  setUserState(user.userId, "SMM_AWAIT_LINK", { platformKey, categoryKey, serviceId: String(serviceId) });
+
   return sendOrEditMessage(
     bot,
     chatId,
-    header,
-    getSocialBoostServicesKeyboard(services, appKey, lang),
+    buildSocialBoostDetailText(lang, serviceName, accountHint),
+    getSocialBoostServiceDetailsKeyboard(detailRows, `service_menu:social_boost:category:${platformKey}:${categoryKey}`, lang),
     options.messageId,
-    "sendSocialBoostServicesMenu"
+    "sendSocialBoostServiceDetails"
   );
+}
+
+function isValidBoostLink(value) {
+  const text = String(value || "").trim();
+  return /^https?:\/\/\S+$/i.test(text) || /^@\w{3,}$/i.test(text);
+}
+
+function buildAwaitQuantityText(lang, payload) {
+  if (lang === "ar") {
+    return [
+      `الحساب: ${payload.link}`,
+      "",
+      `🪴 يرجى إرسال عدد الأعضاء، تذكر أقل عدد للطلب ${payload.min} وأقصى عدد للطلب ${payload.max}`,
+      "",
+      `👤 سعر العضو الواحد: ${payload.unitPrice} 🪙`,
+      "",
+      `🏆 يمكنك رشق ${payload.max} 👥`,
+    ].join("\n");
+  }
+
+  return [
+    `Account: ${payload.link}`,
+    "",
+    `🪴 Send quantity. Min ${payload.min}, max ${payload.max}`,
+    "",
+    `👤 Unit price: ${payload.unitPrice} 🪙`,
+    "",
+    `🏆 Max available: ${payload.max} 👥`,
+  ].join("\n");
+}
+
+function buildExecutionText(lang, payload) {
+  if (lang === "ar") {
+    return [
+      "📋 ملخص العملية: 👇",
+      "",
+      `🕵🏻 النوع: ${payload.serviceName}`,
+      `🪴 الحساب: ${payload.link}`,
+      `📗 العدد المطلوب: [${payload.quantity}] ✅`,
+      `🗼 الضمان: ${payload.refill}`,
+      `💰 السعر: ${payload.total} 🪙`,
+      `💳 رصيدك الآن: ${payload.currentBalance}`,
+      `🏆 رصيدك بعد الخصم: ${payload.afterBalance}`,
+      "",
+      payload.statusLine,
+    ].join("\n");
+  }
+
+  return [
+    "📋 Order summary: 👇",
+    "",
+    `🕵🏻 Type: ${payload.serviceName}`,
+    `🪴 Account: ${payload.link}`,
+    `📗 Quantity: [${payload.quantity}] ✅`,
+    `🗼 Refill: ${payload.refill}`,
+    `💰 Price: ${payload.total} 🪙`,
+    `💳 Current balance: ${payload.currentBalance}`,
+    `🏆 Balance after charge: ${payload.afterBalance}`,
+    "",
+    payload.statusLine,
+  ].join("\n");
+}
+
+async function handleSocialBoostTextInput(bot, msg, appStore) {
+  try {
+    const state = getUserState(msg.from.id);
+    if (!state || !String(state.name || "").startsWith("SMM_AWAIT_")) {
+      return false;
+    }
+
+    const user = appStore.getOrCreateUser(msg.from);
+    const lang = getUserLang(user);
+    const text = String(msg.text || "").trim();
+
+    if (text.toLowerCase() === "cancel") {
+      clearUserState(user.userId);
+      await safeTelegramCall("handleSocialBoostTextInput.cancel", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "تم إلغاء العملية." : "Operation canceled.")
+      );
+      await sendSocialBoostMenu(bot, msg.chat.id, user);
+      return true;
+    }
+
+    if (state.name === "SMM_AWAIT_LINK") {
+      if (!isValidBoostLink(text)) {
+        await safeTelegramCall("handleSocialBoostTextInput.invalidLink", () =>
+          bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ الرابط غير صالح، أرسل رابطًا عامًا صحيحًا." : "❌ Invalid link. Send a valid public link.")
+        );
+        return true;
+      }
+
+      const cached = getCachedSmmServiceById(state.serviceId);
+      const min = Number(cached?.min || 10) || 10;
+      const max = Number(cached?.max || 100000) || 100000;
+      const unitPriceNum = Number(cached?.pricePerUnitRub || 0);
+      const unitPrice = Number.isFinite(unitPriceNum) && unitPriceNum > 0 ? unitPriceNum.toFixed(4) : "0.0000";
+
+      setUserState(user.userId, "SMM_AWAIT_QUANTITY", {
+        platformKey: state.platformKey,
+        categoryKey: state.categoryKey,
+        serviceId: state.serviceId,
+        link: text,
+      });
+
+      await safeTelegramCall("handleSocialBoostTextInput.awaitQty", () =>
+        bot.sendMessage(msg.chat.id, buildAwaitQuantityText(lang, { link: text, min, max, unitPrice }), {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: lang === "ar" ? "- رجوع" : "- Back", callback_data: `service_menu:social_boost:category:${state.platformKey}:${state.categoryKey}` }],
+            ],
+          },
+        })
+      );
+      return true;
+    }
+
+    if (state.name === "SMM_AWAIT_QUANTITY") {
+      if (!/^\d+$/.test(text)) {
+        await safeTelegramCall("handleSocialBoostTextInput.invalidQtyType", () =>
+          bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ أرسل رقمًا صحيحًا فقط." : "❌ Send a valid number only.")
+        );
+        return true;
+      }
+
+      const quantity = Number(text);
+      const cached = getCachedSmmServiceById(state.serviceId);
+      const serviceInfo = getServiceInfo(state.serviceId);
+      if (!cached || !serviceInfo) {
+        clearUserState(user.userId);
+        await safeTelegramCall("handleSocialBoostTextInput.missingService", () =>
+          bot.sendMessage(msg.chat.id, lang === "ar" ? "الخدمة غير متاحة الآن." : "Service is unavailable now.")
+        );
+        return true;
+      }
+
+      const min = Number(cached.min || 1);
+      const max = Number(cached.max || 100000);
+      if (!Number.isFinite(quantity) || quantity < min || quantity > max) {
+        await safeTelegramCall("handleSocialBoostTextInput.outOfRange", () =>
+          bot.sendMessage(msg.chat.id, lang === "ar" ? `❌ العدد يجب أن يكون بين ${min} و ${max}.` : `❌ Quantity must be between ${min} and ${max}.`)
+        );
+        return true;
+      }
+
+      const unitPrice = Number(cached.pricePerUnitRub || 0);
+      const total = Number((unitPrice * quantity).toFixed(4));
+      const currentUser = appStore.findUserById(user.userId);
+      const currentBalance = Number(currentUser?.balance || 0);
+      const afterBalance = Number((currentBalance - total).toFixed(4));
+      const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
+      const refill = getSocialBoostRefill(lang, cached);
+
+      if (currentBalance < total) {
+        await safeTelegramCall("handleSocialBoostTextInput.insufficient", () =>
+          bot.sendMessage(
+            msg.chat.id,
+            buildExecutionText(lang, {
+              serviceName,
+              link: state.link,
+              quantity,
+              refill,
+              total: formatRuble(total),
+              currentBalance: formatRuble(currentBalance),
+              afterBalance: formatRuble(afterBalance),
+              statusLine: lang === "ar" ? "❌ للأسف لا يوجد لديك رصيد كافي 🥺" : "❌ Insufficient balance",
+            }),
+            {
+              reply_markup: {
+                inline_keyboard: [[{ text: lang === "ar" ? "- الغاء" : "- Cancel", callback_data: "social_boost:cancel" }]],
+              },
+            }
+          )
+        );
+        return true;
+      }
+
+      const order = await createSmmOrder({
+        serviceId: state.serviceId,
+        link: state.link,
+        quantity,
+      });
+
+      if (!order.success) {
+        await safeTelegramCall("handleSocialBoostTextInput.providerError", () =>
+          bot.sendMessage(
+            msg.chat.id,
+            buildExecutionText(lang, {
+              serviceName,
+              link: state.link,
+              quantity,
+              refill,
+              total: formatRuble(total),
+              currentBalance: formatRuble(currentBalance),
+              afterBalance: formatRuble(currentBalance),
+              statusLine: lang === "ar" ? "❌ فشل تنفيذ العملية من المزود، حاول مرة أخرى." : "❌ Provider failed to place order.",
+            }),
+            {
+              reply_markup: {
+                inline_keyboard: [[{ text: lang === "ar" ? "- الغاء" : "- Cancel", callback_data: "social_boost:cancel" }]],
+              },
+            }
+          )
+        );
+        return true;
+      }
+
+      appStore.deductBalance(user.userId, total);
+      appStore.incrementTransactions(user.userId);
+      appStore.addProfit(total);
+      appStore.addTransaction({
+        type: "social_boost_order",
+        userId: user.userId,
+        serviceKey: "social_boost",
+        platformKey: state.platformKey,
+        categoryKey: state.categoryKey,
+        serviceId: String(state.serviceId),
+        link: state.link,
+        quantity,
+        amount: total,
+        providerOrderId: String(order.orderId || ""),
+      });
+
+      const updated = appStore.findUserById(user.userId);
+      clearUserState(user.userId);
+
+      await safeTelegramCall("handleSocialBoostTextInput.success", () =>
+        bot.sendMessage(
+          msg.chat.id,
+          buildExecutionText(lang, {
+            serviceName,
+            link: state.link,
+            quantity,
+            refill,
+            total: formatRuble(total),
+            currentBalance: formatRuble(currentBalance),
+            afterBalance: formatRuble(updated?.balance || 0),
+            statusLine: lang === "ar"
+              ? `✅ تم تنفيذ العملية بنجاح | رقم الطلب: ${order.orderId}`
+              : `✅ Order placed successfully | ID: ${order.orderId}`,
+          }),
+          {
+            reply_markup: {
+              inline_keyboard: [[{ text: lang === "ar" ? "- الصفحة الرئيسية" : "- Main Page", callback_data: "menu:main" }]],
+            },
+          }
+        )
+      );
+
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    logBotError("handleSocialBoostTextInput", error, { userId: msg.from?.id });
+    return false;
+  }
 }
 
 async function sendProAccountsMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "proAccounts_inst"), getProMainKeyboard(getArray(lang, "proAccounts_mainCategories"), lang), options.messageId, "sendProAccountsMenu");
+  const title = lang === "ar" ? "💎 حسابات Pro" : "💎 Pro Accounts";
+  return sendOrEditMessage(bot, chatId, title, getProMainKeyboard(getArray(lang, "proAccounts_mainCategories"), lang), options.messageId, "sendProAccountsMenu");
 }
 
 async function sendProSubcategoryMenu(bot, chatId, user, subcategoryKey, options = {}) {
   const lang = getUserLang(user);
-  const map = {
-    ai: "proAccounts_ai",
-    subscriptions: "proAccounts_subscriptions",
-    verification: "proAccounts_verification",
-  };
+  const map = { ai: "proAccounts_ai", subscriptions: "proAccounts_subscriptions", verification: "proAccounts_verification" };
   const items = getArray(lang, map[subcategoryKey]);
-  if (!items.length) {
-    return sendProAccountsMenu(bot, chatId, user, options);
-  }
-  return sendOrEditMessage(bot, chatId, t(lang, "proAccounts_inst"), getProSubcategoryKeyboard(items, subcategoryKey, lang), options.messageId, "sendProSubcategoryMenu");
+  if (!items.length) return sendProAccountsMenu(bot, chatId, user, options);
+  const title = lang === "ar" ? "💎 اختر القسم الفرعي" : "💎 Select Subcategory";
+  return sendOrEditMessage(bot, chatId, title, getProSubcategoryKeyboard(items, subcategoryKey, lang), options.messageId, "sendProSubcategoryMenu");
 }
 
 async function sendSocialAccountsMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "socialAccounts_inst"), getSocialAccountsCategoriesKeyboard(getArray(lang, "socialAccounts_categories"), lang), options.messageId, "sendSocialAccountsMenu");
+  const title = lang === "ar" ? "👥 حسابات السوشال" : "👥 Social Accounts";
+  return sendOrEditMessage(bot, chatId, title, getSocialAccountsCategoriesKeyboard(getArray(lang, "socialAccounts_categories"), lang), options.messageId, "sendSocialAccountsMenu");
 }
 
 async function sendSocialAccountsPlatformsMenu(bot, chatId, user, categoryKey, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "socialAccounts_inst"), getSocialAccountsPlatformsKeyboard(getArray(lang, "socialAccounts_platforms"), categoryKey, lang), options.messageId, "sendSocialAccountsPlatformsMenu");
+  const title = lang === "ar" ? "👥 اختر المنصة" : "👥 Select Platform";
+  return sendOrEditMessage(bot, chatId, title, getSocialAccountsPlatformsKeyboard(getArray(lang, "socialAccounts_platforms"), categoryKey, lang), options.messageId, "sendSocialAccountsPlatformsMenu");
 }
 
 async function sendServiceSelectionPlaceholder(bot, chatId, user, title, options = {}) {
@@ -249,14 +668,7 @@ async function sendServiceSelectionPlaceholder(bot, chatId, user, title, options
   const replyMarkup = { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: options.backCallback || "menu:main" }]] };
 
   if (options.messageId) {
-    return safeTelegramCall("sendServiceSelectionPlaceholder.edit", () =>
-      bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: options.messageId,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup,
-      })
-    );
+    return safeTelegramCall("sendServiceSelectionPlaceholder.edit", () => bot.editMessageText(text, { chat_id: chatId, message_id: options.messageId, parse_mode: "HTML", reply_markup: replyMarkup }));
   }
 
   return safeTelegramCall("sendServiceSelectionPlaceholder.send", () => bot.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: replyMarkup }));
@@ -264,12 +676,14 @@ async function sendServiceSelectionPlaceholder(bot, chatId, user, title, options
 
 async function sendCloudServicesMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "cloudServices_inst"), getCloudServicesKeyboard(getArray(lang, "cloudServices_items"), lang), options.messageId, "sendCloudServicesMenu");
+  const title = lang === "ar" ? "☁️ الخدمات السحابية" : "☁️ Cloud Services";
+  return sendOrEditMessage(bot, chatId, title, getCloudServicesKeyboard(getArray(lang, "cloudServices_items"), lang), options.messageId, "sendCloudServicesMenu");
 }
 
 async function sendTemporaryEmailsMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "temporaryEmails_inst"), getTemporaryEmailsKeyboard(getArray(lang, "temporaryEmails_items"), lang), options.messageId, "sendTemporaryEmailsMenu");
+  const title = lang === "ar" ? "📧 الإيميلات المؤقتة" : "📧 Temporary Emails";
+  return sendOrEditMessage(bot, chatId, title, getTemporaryEmailsKeyboard(getArray(lang, "temporaryEmails_items"), lang), options.messageId, "sendTemporaryEmailsMenu");
 }
 
 function buildMockTempEmailSession() {
@@ -281,7 +695,6 @@ function buildMockTempEmailSession() {
 function buildTempEmailText(user, session, messages = []) {
   const lang = getUserLang(user);
   const lines = [`<b>${t(lang, "temporaryEmails_title")}</b>`, "", `${t(lang, "temporaryEmails_yourMail")} <code>${session.email}</code>`];
-
   if (messages.length) {
     lines.push("", `<b>${t(lang, "temporaryEmails_latest")}</b>`);
     for (const message of messages) {
@@ -291,7 +704,6 @@ function buildTempEmailText(user, session, messages = []) {
       lines.push("");
     }
   }
-
   return lines.join("\n").trim();
 }
 
@@ -301,10 +713,7 @@ async function sendTempEmailSession(bot, chatId, user, session, options = {}) {
 
 function getMockTempEmailMessages(session) {
   session.refreshCount += 1;
-  if (session.refreshCount % 2 !== 0) {
-    return [];
-  }
-
+  if (session.refreshCount % 2 !== 0) return [];
   const code = String(100000 + Math.floor(Math.random() * 900000));
   session.lastCode = code;
   return [{ from: "noreply@service.com", subject: "Verification Code", code }];
@@ -312,7 +721,8 @@ function getMockTempEmailMessages(session) {
 
 async function sendVirtualVisaMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "virtualVisa_inst"), getVirtualVisaKeyboard(getArray(lang, "virtualVisa_items"), lang), options.messageId, "sendVirtualVisaMenu");
+  const title = lang === "ar" ? "💳 الفيزا الافتراضية" : "💳 Virtual Visa";
+  return sendOrEditMessage(bot, chatId, title, getVirtualVisaKeyboard(getArray(lang, "virtualVisa_items"), lang), options.messageId, "sendVirtualVisaMenu");
 }
 
 async function sendGameTopupMenu(bot, chatId, user, pageIndex, options = {}) {
@@ -321,13 +731,14 @@ async function sendGameTopupMenu(bot, chatId, user, pageIndex, options = {}) {
   const totalPages = Math.ceil(items.length / 10);
   const safeIndex = Math.max(0, Math.min(pageIndex, totalPages - 1));
   const pageItems = items.slice(safeIndex * 10, safeIndex * 10 + 10);
-  const text = `${t(lang, "games_inst")}\n\n${safeIndex + 1}/${totalPages}`;
+  const text = `${lang === "ar" ? "🎮 شحن الألعاب" : "🎮 Game Top-up"}\n\n${safeIndex + 1}/${totalPages}`;
   return sendOrEditMessage(bot, chatId, text, getGameTopupKeyboard(pageItems, safeIndex, totalPages, lang), options.messageId, "sendGameTopupMenu");
 }
 
 async function sendOtherServicesMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "otherServices_inst"), getOtherServicesKeyboard(getArray(lang, "otherServices_items"), lang), options.messageId, "sendOtherServicesMenu");
+  const title = lang === "ar" ? "🧩 خدمات أخرى" : "🧩 Other Services";
+  return sendOrEditMessage(bot, chatId, title, getOtherServicesKeyboard(getArray(lang, "otherServices_items"), lang), options.messageId, "sendOtherServicesMenu");
 }
 
 async function sendCustomServicePrompt(bot, chatId, user) {
@@ -337,10 +748,14 @@ async function sendCustomServicePrompt(bot, chatId, user) {
 module.exports = {
   sendVirtualNumbersMenu,
   sendVirtualNumbersProviderMenu,
+  sendVirtualNumbersServerSelectionMenu,
+  sendVirtualNumbersOffersMenu,
   sendVirtualNumbersCountriesMenu,
   sendVirtualNumberCountryDetails,
   sendSocialBoostMenu,
+  sendSocialBoostCategoriesMenu,
   sendSocialBoostServicesMenu,
+  sendSocialBoostServiceDetails,
   sendProAccountsMenu,
   sendProSubcategoryMenu,
   sendSocialAccountsMenu,
@@ -356,4 +771,5 @@ module.exports = {
   sendGameTopupMenu,
   sendOtherServicesMenu,
   sendCustomServicePrompt,
+  handleSocialBoostTextInput,
 };

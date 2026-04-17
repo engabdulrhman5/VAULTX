@@ -4,13 +4,16 @@ const { BOT_TOKEN } = require("./config");
 const { AppStore } = require("./services/appStore");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
+const { isNetworkPermissionError } = require("./utils/network");
 const { requestNumber, getSmsStatus, cancelNumber } = require("./services/grizzlyService");
 const { getSmsProvider } = require("./constants/smsProviders");
+const { t, getUserLang } = require("./locales");
 const {
   fetchAndCachePrices,
   getCachedCountries,
   grizzlyCountries,
 } = require("./services/grizzlyCacheService");
+const { fetchAndCacheSmmServices } = require("./services/smmCacheService");
 const {
   handleStart,
   handleLanguageSelection,
@@ -19,6 +22,7 @@ const {
 const { handleAdminCommand } = require("./handlers/adminHandler");
 const { handleTextMessage } = require("./handlers/messageHandler");
 const { handleCallbackQuery } = require("./handlers/callbackHandler");
+const { handleVirtualNumbersCallback } = require("./services/virtualNumbersFlowService");
 const { handlePreCheckoutQuery, handleSuccessfulPayment } = require("./handlers/paymentHandler");
 const {
   setupBotCommands,
@@ -33,11 +37,32 @@ if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
 }
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const telegramProxyUrl = String(process.env.TELEGRAM_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
+const telegramBaseApiUrl = String(process.env.TELEGRAM_BASE_API_URL || "").trim();
+const botOptions = {
+  polling: {
+    autoStart: true,
+    params: { timeout: 20 },
+    interval: 800,
+  },
+  request: {
+    forever: true,
+  },
+};
+if (telegramProxyUrl) {
+  botOptions.request.proxy = telegramProxyUrl;
+}
+if (telegramBaseApiUrl) {
+  botOptions.baseApiUrl = telegramBaseApiUrl;
+}
+
+const bot = new TelegramBot(BOT_TOKEN, botOptions);
 const appStore = new AppStore();
 const appContext = {
   botUsername: "VaultX",
 };
+let pollingRestartTimer = null;
+let pollingRestartDelayMs = 5000;
 
 function buildVerifyUrl(serviceCode, number) {
   const normalizedNumber = String(number || "").replace(/[^\d+]/g, "");
@@ -63,29 +88,49 @@ function getExpiryDateTime(value, minutes = 20) {
   return formatActivationDateTime(date);
 }
 
-function buildAppDisplayName(serviceCode) {
+function buildAppDisplayName(lang, serviceCode) {
   const appMap = {
-    wa: "واتس اب -𝗪𝗛𝗔𝗧𝗦𝗔𝗣𝗣🛍 🎛 •",
-    tg: "تيليجرام -𝗧𝗘𝗟𝗘𝗚𝗥𝗔𝗠🛍 🎛 •",
+    wa: lang === "ar" ? "واتساب" : "WhatsApp",
+    tg: lang === "ar" ? "تيليجرام" : "Telegram",
   };
-  return appMap[serviceCode] || `${serviceCode} 🛍 🎛 •`;
+  return appMap[serviceCode] || serviceCode;
 }
 
 function buildProviderDisplayName(providerKey) {
   return getSmsProvider(providerKey).name || providerKey;
 }
 
-function buildOrderReceipt({ activationId, number, countryLabel, appDisplayName, providerName, finalPriceRub, createdAt, codeLabel }) {
-  return `➖ رقم الطلب : ${activationId} 🛎\n➖ الدولة : ${countryLabel} •\n➖ الرقم : <code>+${number}</code> ☎️•\n➖ الكود : ${codeLabel}\n➖ الحالة : RECEIVED ... 🔎 •\n➖ التطبيق : ${appDisplayName}\n➖ السرفر : ${providerName} 🧭 •\n➖ السعر : ₽ ${finalPriceRub} 🏷 •\n\n➖ انشاء : ${formatActivationDateTime(createdAt)}   📭•\n➖ انتهاء : ${getExpiryDateTime(createdAt)}  📫•`;
+function buildOrderReceipt(lang, { activationId, number, countryLabel, appDisplayName, providerName, finalPriceRub, createdAt, codeLabel }) {
+  const lines = [
+    `➖ ${t(lang, "virtualNumbers_receipt_activation")} : ${activationId} 🛎`,
+    `➖ ${t(lang, "virtualNumbers_receipt_country")} : ${countryLabel} •`,
+    `➖ ${t(lang, "virtualNumbers_receipt_number")} : <code>+${number}</code> ☎️•`,
+    `➖ ${t(lang, "virtualNumbers_receipt_code")} : ${codeLabel}`,
+    `➖ ${t(lang, "virtualNumbers_receipt_status")} : ${t(lang, "virtualNumbers_receipt_code_pending")} 🔎 •`,
+    `➖ ${t(lang, "virtualNumbers_receipt_app")} : ${appDisplayName}`,
+    `➖ ${t(lang, "virtualNumbers_receipt_provider")} : ${providerName} 🧭 •`,
+    `➖ ${t(lang, "virtualNumbers_receipt_price")} : ₽ ${finalPriceRub} 🏷 •`,
+    "",
+    `➖ ${t(lang, "virtualNumbers_receipt_created")} : ${formatActivationDateTime(createdAt)}   📭•`,
+    `➖ ${t(lang, "virtualNumbers_receipt_expires")} : ${getExpiryDateTime(createdAt)}  📫•`,
+  ];
+  return lines.join("\n");
 }
 
-function buildSmsReceivedText({ number, code, password = "غير متاح" }) {
-  return `✅ 𝐍𝗨𝐌𝐁𝐄𝐑 : <code>+${number}</code>\n💬 𝐂𝐎𝐃𝐄 : <code>${code}</code>\n🔐 𝐏𝐀𝐒𝐒𝐖𝐎𝐑𝐃 : <code>${password}</code>\n\n🌴 اضغط على الكود أو الرقم للنسخ 😌🌸`;
+function buildSmsReceivedText(lang, { number, code, password = t(lang, "virtualNumbers_sms_received_password") }) {
+  return [`✅ ${t(lang, "virtualNumbers_sms_received_number")} : <code>+${number}</code>`,
+    `💬 ${t(lang, "virtualNumbers_sms_received_code")} : <code>${code}</code>`,
+    `🔐 ${t(lang, "virtualNumbers_sms_received_password")} : <code>${password}</code>`,
+    "",
+    t(lang, "virtualNumbers_copy_prompt"),
+  ].join("\n");
 }
 
-// cache is managed by grizzlyCacheService
+// cache is managed by grizzlyCacheService and SMM cache service
 fetchAndCachePrices();
+fetchAndCacheSmmServices();
 setInterval(fetchAndCachePrices, 24 * 60 * 60 * 1000);
+setInterval(fetchAndCacheSmmServices, 24 * 60 * 60 * 1000);
 
 bot.onText(/\/start(?:\s+(.+))?/, async (msg) => {
   try {
@@ -149,8 +194,15 @@ bot.on("callback_query", async (query) => {
       return;
     }
 
+    const virtualNumbersHandled = await handleVirtualNumbersCallback(bot, query, appStore);
+    if (virtualNumbersHandled) {
+      return;
+    }
+
     const chatId = query.message?.chat?.id;
     const messageId = query.message?.message_id;
+    const user = appStore.getOrCreateUser(query.from);
+    const lang = getUserLang(user);
 
     // Part A: display from daily cache for virtual numbers app item
     if (query.data && query.data.startsWith("menu_virtual_numbers_wa")) {
@@ -160,7 +212,7 @@ bot.on("callback_query", async (query) => {
       const availableCountries = getCachedCountries("wa").filter((country) => Boolean(grizzlyCountries[country.countryId]));
       if (!Array.isArray(availableCountries) || availableCountries.length === 0) {
         await safeTelegramCall("callback_query.virtual_numbers.empty", () =>
-          bot.answerCallbackQuery(query.id, { text: "⏳ لم يتم تحميل الأسعار بعد. حاول مرة أخرى بعد قليل", show_alert: true })
+          bot.answerCallbackQuery(query.id, { text: t(lang, "virtualNumbers_loading_prices"), show_alert: true })
         );
         return;
       }
@@ -177,7 +229,8 @@ bot.on("callback_query", async (query) => {
         const finalPriceRub = Number(country.priceRub ?? 0);
 
         const countryData = grizzlyCountries[country.countryId];
-        const buttonText = `₽${finalPriceRub} : ${countryData.flag} ${countryData.name_ar} 🚀`;
+        const countryName = lang === "ar" ? countryData.name_ar : t(lang, `grizzly_country_${country.countryId}`) || countryData.name_ar;
+        const buttonText = `₽${finalPriceRub} : ${countryData.flag} ${countryName} 🚀`;
         const callbackData = `buy_num_wa_${country.countryId}_${finalPriceRub}`;
 
         currentRow.push({ text: buttonText, callback_data: callbackData });
@@ -190,21 +243,24 @@ bot.on("callback_query", async (query) => {
 
       const paginationRow = [];
       if (currentPage > 0) {
-        paginationRow.push({ text: "⬅️ السابق", callback_data: `menu_virtual_numbers_wa:${currentPage - 1}` });
+        paginationRow.push({ text: t(lang, "common_previous"), callback_data: `menu_virtual_numbers_wa:${currentPage - 1}` });
       }
       if (currentPage < totalPages - 1) {
-        paginationRow.push({ text: "التالي ➡️", callback_data: `menu_virtual_numbers_wa:${currentPage + 1}` });
+        paginationRow.push({ text: t(lang, "common_next"), callback_data: `menu_virtual_numbers_wa:${currentPage + 1}` });
       }
       if (paginationRow.length) keyboard.push(paginationRow);
 
-      keyboard.push([{ text: "🔙 العودة", callback_data: "service:virtual_numbers" }]);
+      keyboard.push([{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]);
 
       await safeTelegramCall("callback_query.virtual_numbers.menu", () =>
-        bot.editMessageText(`اختر الدولة لشراء رقم افتراضي من Grizzly (صفحة ${currentPage + 1}/${totalPages})`, {
-          chat_id: chatId,
-          message_id: messageId,
-          reply_markup: { inline_keyboard: keyboard },
-        })
+        bot.editMessageText(
+          `${t(lang, "virtualNumbers_choose_country_title")} (${t(lang, "virtualNumbers_page_counter").replace("{current}", String(currentPage + 1)).replace("{total}", String(totalPages))})`,
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: { inline_keyboard: keyboard },
+          }
+        )
       );
 
       return;
@@ -221,12 +277,12 @@ bot.on("callback_query", async (query) => {
       const price = Number(priceRaw);
 
       await safeTelegramCall("callback_query.buy_num.toast", () =>
-        bot.answerCallbackQuery(query.id, { text: "⏳ Trying to buy... جاري محاولة الشراء", show_alert: false })
+        bot.answerCallbackQuery(query.id, { text: t(lang, "virtualNumbers_buy_trying"), show_alert: false })
       );
 
       if (!Number.isFinite(price) || price <= 0) {
         await safeTelegramCall("callback_query.buy_num.invalid", () =>
-          bot.sendMessage(chatId, "سعر غير صالح. حاول مرة أخرى.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_invalid_price"))
         );
         return;
       }
@@ -234,7 +290,7 @@ bot.on("callback_query", async (query) => {
       const currentUser = appStore.findUserById(user.userId);
       if (!currentUser || currentUser.balance < price) {
         await safeTelegramCall("callback_query.buy_num.insufficient", () =>
-          bot.sendMessage(chatId, "رصيدك غير كافٍ لطلب الرقم.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_insufficient_balance"))
         );
         return;
       }
@@ -242,21 +298,21 @@ bot.on("callback_query", async (query) => {
       const result = await requestNumber(serviceCode, countryId, providerKey);
       if (!result || /^(BAD_|ERROR)/i.test(result)) {
         await safeTelegramCall("callback_query.buy_num.failed", () =>
-          bot.sendMessage(chatId, "عذراً، لم نتمكن من الحصول على رقم الآن. حاول لاحقاً.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_failed"))
         );
         return;
       }
 
       if (result === "NO_NUMBERS" || result === "NO_BALANCE") {
         await safeTelegramCall("callback_query.buy_num.known_failure", () =>
-          bot.sendMessage(chatId, "لا يوجد أرقام متاحة لهذه الدولة حالياً.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_no_numbers_available"))
         );
         return;
       }
 
       if (!String(result).includes("ACCESS_NUMBER")) {
         await safeTelegramCall("callback_query.buy_num.unknown", () =>
-          bot.sendMessage(chatId, "حدث خطأ في استجابة Grizzly، الرجاء المحاولة مرة أخرى.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_api_error"))
         );
         return;
       }
@@ -265,8 +321,8 @@ bot.on("callback_query", async (query) => {
       appStore.deductBalance(currentUser.userId, price);
       const countryMeta = grizzlyCountries[countryId] || { name_ar: "دولة أخرى", flag: "🌍" };
       const countryLabel = countryId === "random"
-        ? "عشوائي 🎲"
-        : `${countryMeta.name_ar} ${countryMeta.flag}`;
+        ? t(lang, "virtualNumbers_country_random")
+        : `${lang === "ar" ? countryMeta.name_ar : t(lang, `grizzly_country_${countryId}`) || countryMeta.name_ar} ${countryMeta.flag}`;
       const purchaseTx = appStore.addTransaction({
         type: "virtual_number_purchase",
         userId: currentUser.userId,
@@ -279,9 +335,9 @@ bot.on("callback_query", async (query) => {
         countryLabel,
       });
 
-      const serviceName = buildAppDisplayName(serviceCode);
+      const serviceName = buildAppDisplayName(lang, serviceCode);
       const verifyUrl = buildVerifyUrl(serviceCode, number);
-      const purchaseText = buildOrderReceipt({
+      const purchaseText = buildOrderReceipt(lang, {
         activationId,
         number,
         countryLabel: purchaseTx.countryLabel || `${countryMeta.name_ar} ${countryMeta.flag}`,
@@ -289,7 +345,7 @@ bot.on("callback_query", async (query) => {
         providerName: buildProviderDisplayName(providerKey),
         finalPriceRub: price,
         createdAt: purchaseTx.createdAt,
-        codeLabel: "قيد الانتظار 📩",
+        codeLabel: t(lang, "virtualNumbers_receipt_code_pending"),
       });
 
       await safeTelegramCall("callback_query.buy_num.success", () =>
@@ -299,10 +355,10 @@ bot.on("callback_query", async (query) => {
           parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [
-              [{ text: "تغيير الرقم", callback_data: `change_num_${providerKey}_${activationId}_${price}_${serviceCode}_${countryId}` }],
-              [{ text: "طلب الكود", callback_data: `checksms_${providerKey}_${activationId}` }],
-              [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
-              [{ text: "إلغاء الطلب", callback_data: `cancelnum_${providerKey}_${activationId}_${price}` }],
+              [{ text: t(lang, "virtualNumbers_change_number"), callback_data: `change_num_${providerKey}_${activationId}_${price}_${serviceCode}_${countryId}` }],
+              [{ text: t(lang, "virtualNumbers_request_code"), callback_data: `checksms_${providerKey}_${activationId}` }],
+              [{ text: t(lang, "virtualNumbers_verify_number"), url: verifyUrl }],
+              [{ text: t(lang, "virtualNumbers_cancel_order"), callback_data: `cancelnum_${providerKey}_${activationId}_${price}` }],
             ],
           },
         })
@@ -331,7 +387,7 @@ bot.on("callback_query", async (query) => {
       const currentUser = appStore.findUserById(user.userId);
       if (!currentUser || currentUser.balance < price) {
         await safeTelegramCall("callback_query.change_num.insufficient", () =>
-          bot.sendMessage(chatId, "لا يمكن تغيير الرقم حالياً بسبب الرصيد.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_change_number_error_balance"))
         );
         return;
       }
@@ -339,7 +395,7 @@ bot.on("callback_query", async (query) => {
       const result = await requestNumber(serviceCode, countryId, providerKey);
       if (!result || /^(NO_|BAD_|ERROR)/i.test(result) || !String(result).includes("ACCESS_NUMBER")) {
         await safeTelegramCall("callback_query.change_num.failed", () =>
-          bot.sendMessage(chatId, "تعذر تغيير الرقم حالياً، تم استرجاع الرصيد.")
+          bot.sendMessage(chatId, t(lang, "virtualNumbers_change_number_failed"))
         );
         return;
       }
@@ -356,19 +412,19 @@ bot.on("callback_query", async (query) => {
         countryId,
         activationId: newActivationId,
         number,
-        countryLabel: `${countryMeta.name_ar} ${countryMeta.flag}`,
+        countryLabel: `${lang === "ar" ? countryMeta.name_ar : t(lang, `grizzly_country_${countryId}`) || countryMeta.name_ar} ${countryMeta.flag}`,
       });
 
       const verifyUrl = buildVerifyUrl(serviceCode, number);
-      const purchaseText = buildOrderReceipt({
+      const purchaseText = buildOrderReceipt(lang, {
         activationId: newActivationId,
         number,
         countryLabel: purchaseTx.countryLabel,
-        appDisplayName: buildAppDisplayName(serviceCode),
+        appDisplayName: buildAppDisplayName(lang, serviceCode),
         providerName: buildProviderDisplayName(providerKey),
         finalPriceRub: price,
         createdAt: purchaseTx.createdAt,
-        codeLabel: "قيد الانتظار 📩",
+        codeLabel: t(lang, "virtualNumbers_receipt_code_pending"),
       });
 
       await safeTelegramCall("callback_query.change_num.success", () =>
@@ -378,10 +434,10 @@ bot.on("callback_query", async (query) => {
           parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [
-              [{ text: "تغيير الرقم", callback_data: `change_num_${providerKey}_${newActivationId}_${price}_${serviceCode}_${countryId}` }],
-              [{ text: "طلب الكود", callback_data: `checksms_${providerKey}_${newActivationId}` }],
-              [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
-              [{ text: "إلغاء الطلب", callback_data: `cancelnum_${providerKey}_${newActivationId}_${price}` }],
+              [{ text: t(lang, "virtualNumbers_change_number"), callback_data: `change_num_${providerKey}_${newActivationId}_${price}_${serviceCode}_${countryId}` }],
+              [{ text: t(lang, "virtualNumbers_request_code"), callback_data: `checksms_${providerKey}_${newActivationId}` }],
+              [{ text: t(lang, "virtualNumbers_verify_number"), url: verifyUrl }],
+              [{ text: t(lang, "virtualNumbers_cancel_order"), callback_data: `cancelnum_${providerKey}_${newActivationId}_${price}` }],
             ],
           },
         })
@@ -398,7 +454,7 @@ bot.on("callback_query", async (query) => {
 
       if (!status || status.startsWith("STATUS_WAIT_CODE")) {
         await safeTelegramCall("callback_query.checksms.wait", () =>
-          bot.answerCallbackQuery(query.id, { text: "⏳ لم يصل الكود بعد...", show_alert: true })
+          bot.answerCallbackQuery(query.id, { text: t(lang, "virtualNumbers_waiting_code"), show_alert: true })
         );
         return;
       }
@@ -408,7 +464,7 @@ bot.on("callback_query", async (query) => {
         const purchaseTx = appStore.getLatestTransactionByActivationId(activationId);
         const serviceCode = purchaseTx?.serviceCode || "wa";
         const verifyUrl = buildVerifyUrl(serviceCode, purchaseTx?.number || "");
-        const newText = buildSmsReceivedText({
+        const newText = buildSmsReceivedText(lang, {
           number: String(purchaseTx?.number || ""),
           code: String(code),
         });
@@ -420,7 +476,7 @@ bot.on("callback_query", async (query) => {
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: [
-                [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
+                [{ text: t(lang, "virtualNumbers_verify_number"), url: verifyUrl }],
               ],
             },
           })
@@ -429,7 +485,7 @@ bot.on("callback_query", async (query) => {
       }
 
       await safeTelegramCall("callback_query.checksms.unknown", () =>
-        bot.answerCallbackQuery(query.id, { text: "⏳ الحالة غير معروفة حالياً.", show_alert: true })
+        bot.answerCallbackQuery(query.id, { text: t(lang, "virtualNumbers_status_unknown"), show_alert: true })
       );
       return;
     }
@@ -455,7 +511,7 @@ bot.on("callback_query", async (query) => {
       }
 
       await safeTelegramCall("callback_query.cancelnum.done", () =>
-        bot.editMessageText(`❌ تم إلغاء الرقم واسترجاع ${price}₽`, {
+        bot.editMessageText(t(lang, "virtualNumbers_cancelled_refund").replace("{price}", String(price)), {
           chat_id: chatId,
           message_id: messageId,
         })
@@ -522,6 +578,23 @@ bot.on("message", async (msg) => {
 bot.on("polling_error", (error) => {
   try {
     logBotError("polling_error", error);
+    if (isNetworkPermissionError(error)) {
+      if (!pollingRestartTimer) {
+        pollingRestartTimer = setTimeout(async () => {
+          pollingRestartTimer = null;
+          try {
+            await bot.stopPolling({ cancel: false });
+          } catch (_) {}
+          try {
+            await bot.startPolling();
+            pollingRestartDelayMs = 5000;
+          } catch (restartError) {
+            logBotError("polling_restart", restartError);
+            pollingRestartDelayMs = Math.min(pollingRestartDelayMs * 2, 60000);
+          }
+        }, pollingRestartDelayMs);
+      }
+    }
   } catch (innerError) {
     console.error("Fatal polling logger failure:", innerError.message);
   }
@@ -533,6 +606,12 @@ async function bootstrap() {
     appContext.botUsername = botInfo.username;
     await setupBotCommands(bot);
     console.log(`Telegram bot is running as @${botInfo.username}`);
+    if (telegramProxyUrl) {
+      console.log("[telegram] proxy is enabled");
+    }
+    if (telegramBaseApiUrl) {
+      console.log(`[telegram] custom base API URL: ${telegramBaseApiUrl}`);
+    }
   } catch (error) {
     logBotError("bootstrap", error);
     console.log("Telegram bot is running...");

@@ -3,7 +3,7 @@
     "userId": 6304459652,
     "username": "MMerso88",
     "firstName": "M",
-    "balance": 123670.4,
+    "balance": 122625.4,
     "totalDeposits": 0,
     "currency": "RUB",
     "level": "Newbie",
@@ -11,11 +11,11 @@
     "role": "admin",
     "isActive": true,
     "isVerified": true,
-    "transactionsCount": 2,
+    "transactionsCount": 3,
     "invitedBy": null,
     "referralRewarded": false,
     "referralCommissionCount": 0,
-    "lastSeenAt": "2026-03-31T03:40:49.859Z",
+    "lastSeenAt": "2026-04-17T19:45:55.846Z",
     "createdAt": "2026-03-30T01:54:44.569Z"
   },
   {
@@ -34,14 +34,14 @@
     "invitedBy": 6304459652,
     "referralRewarded": true,
     "referralCommissionCount": 0,
-    "lastSeenAt": "2026-03-31T01:59:45.890Z",
+    "lastSeenAt": "2026-04-05T22:47:09.262Z",
     "createdAt": "2026-03-30T02:31:13.747Z"
   },
   {
     "userId": 1317098132,
     "username": "",
     "firstName": "صفوان الحمدي",
-    "balance": 0,
+    "balance": 1088,
     "totalDeposits": 0,
     "currency": "RUB",
     "level": "Newbie",
@@ -49,11 +49,11 @@
     "role": "user",
     "isActive": true,
     "isVerified": true,
-    "transactionsCount": 1,
+    "transactionsCount": 2,
     "invitedBy": 6304459652,
     "referralRewarded": true,
     "referralCommissionCount": 0,
-    "lastSeenAt": "2026-03-30T19:20:15.702Z",
+    "lastSeenAt": "2026-04-06T17:03:02.633Z",
     "createdAt": "2026-03-30T19:10:41.758Z"
   }
 ]

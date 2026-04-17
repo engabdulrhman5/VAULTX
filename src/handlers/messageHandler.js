@@ -14,6 +14,8 @@ const { logBotError } = require("../services/errorLogger");
 const { formatRuble, escapeHtml, getDisplayName } = require("../utils/formatters");
 const { notifyAdmin } = require("./startHandler");
 const { getUserLang } = require("../locales");
+const { handleVirtualNumbersTextInput } = require("../services/virtualNumbersFlowService");
+const { handleSocialBoostTextInput } = require("../services/serviceMenusService");
 
 async function exportUsersList(bot, chatId, appStore) {
   try {
@@ -365,6 +367,16 @@ async function handleAdminState(bot, msg, appStore) {
 
 async function handleTextMessage(bot, msg, appStore) {
   try {
+    const virtualNumbersTextHandled = await handleVirtualNumbersTextInput(bot, msg, appStore);
+    if (virtualNumbersTextHandled) {
+      return;
+    }
+
+    const socialBoostHandled = await handleSocialBoostTextInput(bot, msg, appStore);
+    if (socialBoostHandled) {
+      return;
+    }
+
     const adminHandled = await handleAdminState(bot, msg, appStore);
     if (adminHandled) {
       return;
@@ -385,9 +397,7 @@ async function handleTextMessage(bot, msg, appStore) {
       return;
     }
 
-    await safeTelegramCall("handleTextMessage.fallback", () =>
-      bot.sendMessage(msg.chat.id, "استخدم الأزرار المضمنة داخل الرسائل للتنقل داخل البوت.")
-    );
+    return;
   } catch (error) {
     logBotError("handleTextMessage", error, { userId: msg.from?.id });
   }

@@ -41,9 +41,23 @@ class AppStore {
   loadAll() {
     const legacyStore = loadData(STORE_DB_PATH, null);
     this.users = loadData(USERS_DB_PATH, legacyStore?.users || []).map((user) => this.normalizeUser(user));
+    const defaults = this.getDefaultConfig();
+    const loaded = loadData(
+      CONFIG_DB_PATH,
+      legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : defaults
+    ) || {};
+
     this.config = {
-      ...this.getDefaultConfig(),
-      ...(loadData(CONFIG_DB_PATH, legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : this.getDefaultConfig())),
+      ...defaults,
+      ...loaded,
+      services: {
+        ...defaults.services,
+        ...(loaded.services || {}),
+      },
+      botStats: {
+        ...defaults.botStats,
+        ...(loaded.botStats || {}),
+      },
     };
     this.transactions = loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || []);
     this.persistAll();
@@ -196,6 +210,24 @@ class AppStore {
     return [...this.transactions]
       .reverse()
       .find((tx) => String(tx.activationId || "") === String(activationId || ""));
+  }
+
+  markActivationNotified(activationId) {
+    const index = [...this.transactions]
+      .map((tx, idx) => ({ tx, idx }))
+      .reverse()
+      .find((item) => String(item.tx.activationId || "") === String(activationId || ""))?.idx;
+
+    if (index === undefined) {
+      return null;
+    }
+
+    this.transactions[index] = {
+      ...this.transactions[index],
+      activationNotified: true,
+    };
+    this.persistAll();
+    return this.transactions[index];
   }
 
   getServices() {

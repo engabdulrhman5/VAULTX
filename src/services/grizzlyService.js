@@ -1,16 +1,35 @@
 const { logBotError } = require("./errorLogger");
 const { getGrizzlyServiceCode, getGrizzlyCountryMeta } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
+const { getAxiosNetworkOptions } = require("../utils/network");
+const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
 
-const CACHE_TTL_MS = 2 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const GRIZZLY_PRICES_PAGE_SIZE = 36;
 const priceCache = new Map();
+const VIRTUAL_CACHE_PATH = path.resolve(__dirname, "..", "..", "data", "virtual-number-cache.json");
+const REQUEST_TIMEOUT_MS = 15000;
+const DEBUG_HERO = String(process.env.DEBUG_HERO || "1") !== "0";
 
 function getCacheKey(providerKey, serviceCode) {
   return `prices:${providerKey}:${serviceCode}`;
 }
 
-function buildProviderUrl(providerKey, params) {
+function parseProviderBaseUrls(providerKey) {
+  const provider = getSmsProvider(providerKey);
+  const envValue = providerKey === "server1"
+    ? process.env.HERO_BASE_URLS
+    : process.env.GRIZZLY_BASE_URLS;
+  const urls = String(envValue || provider.baseUrl || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return urls.length ? urls : [provider.baseUrl];
+}
+
+function buildProviderUrl(baseUrl, providerKey, params) {
   const provider = getSmsProvider(providerKey);
   const apiKey = provider.apiKey;
   if (!apiKey) {
@@ -21,63 +40,158 @@ function buildProviderUrl(providerKey, params) {
     api_key: apiKey,
     ...params,
   });
-  return `${provider.baseUrl}?${query.toString()}`;
+  return `${baseUrl}?${query.toString()}`;
 }
 
-function parseGrizzlyResponse(rawText) {
+function parseProviderResponse(rawText) {
   const trimmed = String(rawText || "").trim();
   if (!trimmed) {
-    throw new Error("Empty response from Grizzly API");
+    throw new Error("Empty response from SMS provider API");
   }
 
   if (/^(BAD_|ERROR|NO_)/i.test(trimmed)) {
-    throw new Error(`Grizzly API error: ${trimmed}`);
+    throw new Error(`SMS provider API error: ${trimmed}`);
   }
 
   return JSON.parse(trimmed);
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json,text/plain;q=0.9,*/*;q=0.8" },
-  });
+function readFileCache() {
+  try {
+    if (!fs.existsSync(VIRTUAL_CACHE_PATH)) {
+      return {};
+    }
 
-  if (!response.ok) {
-    throw new Error(`Grizzly API HTTP ${response.status}`);
+    const raw = fs.readFileSync(VIRTUAL_CACHE_PATH, "utf8");
+    return JSON.parse(raw || "{}") || {};
+  } catch (error) {
+    logBotError("grizzlyService.readFileCache", error);
+    return {};
   }
-
-  return parseGrizzlyResponse(await response.text());
 }
 
-async function fetchText(url) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "text/plain,*/*;q=0.8" },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Grizzly API HTTP ${response.status}`);
+function writeFileCache(next) {
+  try {
+    fs.writeFileSync(VIRTUAL_CACHE_PATH, JSON.stringify(next, null, 2), "utf8");
+  } catch (error) {
+    logBotError("grizzlyService.writeFileCache", error);
   }
-
-  return String(await response.text()).trim();
 }
 
-async function getServicePrices(serviceCode, providerKey = "server2") {
+function readCachedPrices(providerKey, serviceCode) {
+  const cache = readFileCache();
+  const cacheKey = `prices:${providerKey}:${serviceCode}`;
+  const entry = cache[cacheKey];
+  if (!entry || !entry.at || !entry.data) {
+    return null;
+  }
+
+  if (Date.now() - Number(entry.at) > CACHE_TTL_MS) {
+    return null;
+  }
+
+  return entry.data;
+}
+
+function writeCachedPrices(providerKey, serviceCode, data) {
+  const cache = readFileCache();
+  cache[`prices:${providerKey}:${serviceCode}`] = {
+    at: Date.now(),
+    data,
+  };
+  writeFileCache(cache);
+}
+
+function getProviderProxy(providerKey = "server2") {
+  if (providerKey === "server1") {
+    return String(process.env.HERO_PROXY_URL || process.env.SMS_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
+  }
+  return String(process.env.GRIZZLY_PROXY_URL || process.env.SMS_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
+}
+
+async function fetchRaw(url, providerKey = "server2", accept = "application/json,text/plain;q=0.9,*/*;q=0.8") {
+  const response = await axios.get(url, {
+    headers: { Accept: accept },
+    timeout: REQUEST_TIMEOUT_MS,
+    ...getAxiosNetworkOptions(getProviderProxy(providerKey)),
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`SMS provider API HTTP ${response.status}`);
+  }
+  if (typeof response.data === "string") {
+    return response.data.trim();
+  }
+  return JSON.stringify(response.data || {}).trim();
+}
+
+async function fetchJson(url, providerKey = "server2") {
+  return parseProviderResponse(await fetchRaw(url, providerKey));
+}
+
+async function fetchText(url, providerKey = "server2") {
+  return await fetchRaw(url, providerKey, "text/plain,*/*;q=0.8");
+}
+
+async function requestProviderWithFailover(providerKey, params, mode = "json") {
+  const baseUrls = parseProviderBaseUrls(providerKey);
+  let lastError = null;
+
+  for (const baseUrl of baseUrls) {
+    const url = buildProviderUrl(baseUrl, providerKey, params);
+    try {
+      if (mode === "text") {
+        return await fetchText(url, providerKey);
+      }
+      return await fetchJson(url, providerKey);
+    } catch (error) {
+      lastError = error;
+      logBotError("provider.request.failover", error, { providerKey, baseUrl, action: params.action });
+    }
+  }
+
+  throw lastError || new Error("Provider request failed");
+}
+
+async function getServicePrices(serviceCode, providerKey = "server2", options = {}) {
   try {
     const cacheKey = getCacheKey(providerKey, serviceCode);
     const cached = priceCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    if (!options.forceRefresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
       return cached.data;
     }
 
-    const data = await fetchJson(buildProviderUrl(providerKey, {
+    if (!options.forceRefresh) {
+      const fileCached = readCachedPrices(providerKey, serviceCode);
+      if (fileCached) {
+        priceCache.set(cacheKey, { at: Date.now(), data: fileCached });
+        return fileCached;
+      }
+    }
+
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.log(`[HeroSMS] Fetching prices for service "${serviceCode}"`);
+    }
+
+    const data = await requestProviderWithFailover(providerKey, {
       action: "getPrices",
       service: serviceCode,
-    }));
+    }, "json");
+
+    if (!data || typeof data !== "object") {
+      throw new Error("Provider returned an invalid JSON payload");
+    }
+
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.log(`[HeroSMS] Prices payload country count: ${Object.keys(data).length}`);
+    }
+
     priceCache.set(cacheKey, { at: Date.now(), data });
+    writeCachedPrices(providerKey, serviceCode, data);
     return data;
   } catch (error) {
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.error("[HeroSMS] getServicePrices failed:", error.message);
+    }
     logBotError("getServicePrices", error, { serviceCode, providerKey });
     return null;
   }
@@ -85,14 +199,16 @@ async function getServicePrices(serviceCode, providerKey = "server2") {
 
 async function requestNumber(serviceCode, countryId, providerKey = "server2") {
   try {
-    const url = buildProviderUrl(providerKey, {
+    const responseText = await requestProviderWithFailover(providerKey, {
       action: "getNumber",
       service: serviceCode,
       country: countryId,
-    });
-    const responseText = await fetchText(url);
+    }, "text");
     return String(responseText || "").trim();
   } catch (error) {
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.error("[HeroSMS] requestNumber failed:", error.message);
+    }
     logBotError("requestNumber", error, { serviceCode, countryId, providerKey });
     return null;
   }
@@ -100,12 +216,14 @@ async function requestNumber(serviceCode, countryId, providerKey = "server2") {
 
 async function getSmsStatus(activationId, providerKey = "server2") {
   try {
-    const url = buildProviderUrl(providerKey, {
+    return await requestProviderWithFailover(providerKey, {
       action: "getStatus",
       id: activationId,
-    });
-    return await fetchText(url);
+    }, "text");
   } catch (error) {
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.error("[HeroSMS] getSmsStatus failed:", error.message);
+    }
     logBotError("getSmsStatus", error, { activationId, providerKey });
     return null;
   }
@@ -113,13 +231,15 @@ async function getSmsStatus(activationId, providerKey = "server2") {
 
 async function cancelNumber(activationId, providerKey = "server2") {
   try {
-    const url = buildProviderUrl(providerKey, {
+    return await requestProviderWithFailover(providerKey, {
       action: "setStatus",
       status: "8",
       id: activationId,
-    });
-    return await fetchText(url);
+    }, "text");
   } catch (error) {
+    if (providerKey === "server1" && DEBUG_HERO) {
+      console.error("[HeroSMS] cancelNumber failed:", error.message);
+    }
     logBotError("cancelNumber", error, { activationId, providerKey });
     return null;
   }

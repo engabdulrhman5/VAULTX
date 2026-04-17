@@ -9,7 +9,7 @@ const adminIds = String(process.env.ADMIN_IDS || process.env.ADMIN_ID || "")
 const ADMIN_ID = adminIds[0] || null;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const LOG_CHANNEL_ID = Number(process.env.LOG_CHANNEL_ID || -1003822505585);
-const ACTIVATIONS_CHANNEL_ID = Number(process.env.ACTIVATIONS_CHANNEL_ID || LOG_CHANNEL_ID);
+const ACTIVATIONS_CHANNEL_ID = Number(process.env.ACTIVATIONS_CHANNEL_ID || -1003311851705);
 
 module.exports = {
   ADMIN_ID,

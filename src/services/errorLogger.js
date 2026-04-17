@@ -2,6 +2,8 @@ const fs = require("fs");
 const { BOT_ERRORS_PATH } = require("../config");
 
 const botErrors = [];
+const recentErrorMap = new Map();
+const DEDUPE_WINDOW_MS = 30 * 1000;
 
 function loadExistingErrors() {
   try {
@@ -27,9 +29,18 @@ function persistErrors() {
 }
 
 function logBotError(scope, error, meta = {}) {
+  const message = error?.message || String(error);
+  const dedupeKey = `${scope}::${message}`;
+  const now = Date.now();
+  const existing = recentErrorMap.get(dedupeKey);
+  if (existing && now - existing < DEDUPE_WINDOW_MS) {
+    return null;
+  }
+  recentErrorMap.set(dedupeKey, now);
+
   const entry = {
     scope,
-    message: error?.message || String(error),
+    message,
     stack: error?.stack || null,
     meta,
     createdAt: new Date().toISOString(),

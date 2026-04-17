@@ -12,7 +12,9 @@ function buildCountryButton(lang, id, apiPrice) {
   }
 
   const country = getGrizzlyCountryMeta(id);
-  const name = country.name_ar || t(lang, `grizzly_country_${id}`) || t(lang, "grizzly_country_other");
+  const name = lang === "ar"
+    ? country.name_ar || t(lang, `grizzly_country_${id}`) || t(lang, "grizzly_country_other")
+    : t(lang, `grizzly_country_${id}`) || country.name_ar || t(lang, "grizzly_country_other");
   const finalPriceRub = Math.ceil(parseFloat(apiPrice) * 25 * 1.20);
 
   if (!Number.isFinite(finalPriceRub) || finalPriceRub <= 0) {
@@ -89,8 +91,8 @@ async function sendGrizzlyCountriesMenu(bot, chatId, user, appLabelOrKey, page =
     t(lang, "grizzly_header"),
     "",
     `${t(lang, "grizzly_service_label")}: ${serviceLabel}`,
-    `السيرفر: ${providerKey === "server1" ? "1" : "2"}`,
-    "الصف الأول مخصص للأرخص عالمياً لهذا التطبيق.",
+    `${t(lang, "virtualNumbers_provider_label")} ${providerKey === "server1" ? "1" : "2"}`,
+    t(lang, "virtualNumbers_first_row_note"),
     t(lang, "grizzly_select_country"),
     "",
     `${t(lang, "grizzly_page_label")}: ${safePage + 1}/${totalPages}`,
@@ -114,7 +116,9 @@ async function sendGrizzlyCountryDetails(bot, chatId, user, serviceCode, country
   const finalPriceRub = apiPrice === null ? null : Math.ceil(parseFloat(apiPrice) * 25 * 1.20);
 
   const country = getGrizzlyCountryMeta(countryId);
-  const countryName = country.name_ar || t(lang, `grizzly_country_${countryId}`) || t(lang, "grizzly_country_other");
+  const countryName = lang === "ar"
+    ? country.name_ar || t(lang, `grizzly_country_${countryId}`) || t(lang, "grizzly_country_other")
+    : t(lang, `grizzly_country_${countryId}`) || country.name_ar || t(lang, "grizzly_country_other");
   const priceText = finalPriceRub === null ? t(lang, "grizzly_price_unavailable") : `${finalPriceRub} RUB`;
   const serviceLabel = findServiceLabel(lang, serviceCode);
 

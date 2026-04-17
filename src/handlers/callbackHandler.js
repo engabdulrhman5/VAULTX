@@ -1,4 +1,4 @@
-const { ADMIN_ID } = require("../config");
+﻿const { ADMIN_ID } = require("../config");
 const { SERVICE_KEYS } = require("../constants/menu");
 const { getArray, t, getUserLang } = require("../locales");
 const { sendPlaceholderReply } = require("../services/menuService");
@@ -26,9 +26,12 @@ const {
 } = require("../services/topupService");
 const {
   sendVirtualNumbersMenu,
-  sendVirtualNumbersProviderMenu,
+  sendVirtualNumbersServerSelectionMenu,
+  sendVirtualNumbersOffersMenu,
   sendSocialBoostMenu,
+  sendSocialBoostCategoriesMenu,
   sendSocialBoostServicesMenu,
+  sendSocialBoostServiceDetails,
   sendProAccountsMenu,
   sendProSubcategoryMenu,
   sendSocialAccountsMenu,
@@ -71,8 +74,25 @@ function buildVerifyUrl(serviceCode, number) {
   return `https://wa.me/${normalizedNumber.replace(/^\+/, "")}`;
 }
 
-function buildPurchaseReceipt({ number, countryData, appName, finalPriceRub, statusLine }) {
-  return `لقد تم طلب الرقم بنجاح ✅\n\nالرقم : <code>+${number}</code>\nالدولة : ${countryData.name_ar} ${countryData.flag}\nالتطبيق : ${appName} 💬\nالسعر : ${finalPriceRub}.00₽\n---------------------------\nحاله الرقم : ${statusLine}\n---------------------------\n* لديك 20 دقيقه لإلغاء الرقم قبل الحذف`;
+function buildPurchaseReceipt(lang, { number, countryData, countryId, appName, finalPriceRub, statusLine }) {
+  const countryLabel = lang === "ar"
+    ? countryData.name_ar
+    : t(lang, `grizzly_country_${countryId}`) || countryData.name_ar;
+
+  return [
+    lang === "ar" ? "لقد تم طلب الرقم بنجاح ✅" : "The number has been ordered successfully ✅",
+    "",
+    `${t(lang, "virtualNumbers_receipt_number")} : <code>+${number}</code>`,
+    `${t(lang, "virtualNumbers_receipt_country")} : ${countryLabel} ${countryData.flag}`,
+    `${t(lang, "virtualNumbers_receipt_app")} : ${appName}`,
+    `${t(lang, "virtualNumbers_receipt_price")} : ${finalPriceRub}.00₽`,
+    "---------------------------",
+    `${t(lang, "virtualNumbers_receipt_status")} : ${statusLine}`,
+    "---------------------------",
+    lang === "ar"
+      ? "* لديك 20 دقيقة لإلغاء الرقم قبل الحذف"
+      : "* You have 20 minutes to cancel the number before deletion",
+  ].join("\n");
 }
 
 async function ensureAdmin(bot, query) {
@@ -82,7 +102,7 @@ async function ensureAdmin(bot, query) {
 
   await safeTelegramCall("ensureAdmin", () =>
     bot.answerCallbackQuery(query.id, {
-      text: "❌ ليس لديك صلاحية",
+      text: "❌ ليست لديك صلاحية",
       show_alert: true,
     })
   );
@@ -138,14 +158,14 @@ async function handleAdminCallbacks(bot, query, appStore) {
       case "admin:add_balance":
         setUserState(ADMIN_ID, "AWAITING_ADD_BALANCE_ID");
         await safeTelegramCall("handleAdminCallbacks.addBalance", () =>
-          bot.sendMessage(chatId, "أرسل User ID أولاً. للإلغاء: Cancel")
+          bot.sendMessage(chatId, "أرسل User ID أولًا. للإلغاء: Cancel")
         );
         return true;
 
       case "admin:deduct_balance":
         setUserState(ADMIN_ID, "ADMIN_AWAITING_DEDUCT_BALANCE_USER");
         await safeTelegramCall("handleAdminCallbacks.deductBalance", () =>
-          bot.sendMessage(chatId, "أرسل User ID أولاً. للإلغاء: Cancel")
+          bot.sendMessage(chatId, "أرسل User ID أولًا. للإلغاء: Cancel")
         );
         return true;
 
@@ -189,7 +209,7 @@ async function handleAdminCallbacks(bot, query, appStore) {
       case "admin:upload_data":
         setUserState(ADMIN_ID, "ADMIN_AWAITING_UPLOAD_DATA");
         await safeTelegramCall("handleAdminCallbacks.upload", () =>
-          bot.sendMessage(chatId, "أرسل JSON أو رابط Google Sheets. هذه خطوة تمهيدية حالياً. للإلغاء: Cancel")
+          bot.sendMessage(chatId, "أرسل JSON أو رابط Google Sheets. هذه خطوة تمهيدية حاليًا. للإلغاء: Cancel")
         );
         return true;
 
@@ -270,6 +290,9 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
     }
 
     await safeTelegramCall("handleCallbackQuery.answer", () => bot.answerCallbackQuery(query.id));
+    if (query.data === "noop") {
+      return true;
+    }
     const user = appStore.getOrCreateUser(query.from);
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
@@ -282,14 +305,32 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
     }, {});
     const socialBoostKeyMap = {
       instagram: "instagram",
+      "إنستجرام": "instagram",
       tiktok: "tiktok",
+      "تيك توك": "tiktok",
       youtube: "youtube",
+      "يوتيوب": "youtube",
       telegram: "telegram",
+      "تيليجرام": "telegram",
       facebook: "facebook",
-      twitter: "twitter",
-      snapchat: "snapchat",
+      "فيسبوك": "facebook",
+      kwai: "kwai",
+      "كواي": "kwai",
+      threads: "threads",
+      "ثريدز": "threads",
       whatsapp: "whatsapp",
+      "واتساب": "whatsapp",
+      likee: "likee",
+      "لايكي": "likee",
+      twitter: "twitter",
+      "تويتر/x": "twitter",
+      "تويتر": "twitter",
+      snapchat: "snapchat",
+      "سناب شات": "snapchat",
+      twitch: "twitch",
+      "تويتش": "twitch",
       linkedin: "linkedin",
+      "لينكدإن": "linkedin",
     };
 
     switch (query.data) {
@@ -393,19 +434,20 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
             });
 
             const verifyUrl = buildVerifyUrl(serviceCode, number);
-            const message = buildPurchaseReceipt({
+            const message = buildPurchaseReceipt(lang, {
               number: String(number || ""),
               countryData: countryMeta,
+              countryId,
               appName,
               finalPriceRub: price,
-              statusLine: "بإنتظار وصول الكود ⏳",
+              statusLine: lang === "ar" ? "بانتظار وصول الكود ⏳" : "Waiting for the code ⏳",
             });
 
             const replyMarkup = {
               inline_keyboard: [
-                [{ text: "تحديث الرسائل 🔄", callback_data: `checksms_${providerKey}_${activationId}` }],
-                [{ text: "إلغاء الرقم ❌", callback_data: `cancelnum_${providerKey}_${activationId}_${price}` }],
-                [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
+                [{ text: t(lang, "virtualNumbers_refresh_messages"), callback_data: `checksms_${providerKey}_${activationId}` }],
+                [{ text: t(lang, "virtualNumbers_cancel_order"), callback_data: `cancelnum_${providerKey}_${activationId}_${price}` }],
+                [{ text: t(lang, "virtualNumbers_verify_number"), url: verifyUrl }],
               ],
             };
 
@@ -455,12 +497,15 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
             const countryData = require("../constants/grizzly").getGrizzlyCountryMeta(purchaseTx?.countryId);
             const appName = resolveGrizzlyAppLabel(lang, serviceCode);
             const verifyUrl = buildVerifyUrl(serviceCode, purchaseTx?.number || "");
-            const text = buildPurchaseReceipt({
+            const text = buildPurchaseReceipt(lang, {
               number: String(purchaseTx?.number || ""),
               countryData,
+              countryId: purchaseTx?.countryId,
               appName,
               finalPriceRub: Number(purchaseTx?.amount || 0),
-              statusLine: `الكود هو <code>${String(code)}</code> ✅`,
+              statusLine: lang === "ar"
+                ? `الكود هو <code>${String(code)}</code> ✅`
+                : `The code is <code>${String(code)}</code> ✅`,
             });
             await safeTelegramCall("handleCallbackQuery.checkSms.ok", () =>
               bot.editMessageText(text, {
@@ -469,7 +514,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
                 parse_mode: "HTML",
                 reply_markup: {
                   inline_keyboard: [
-                    [{ text: "التحقق من الرقم 💬", url: verifyUrl }],
+                    [{ text: t(lang, "virtualNumbers_verify_number"), url: verifyUrl }],
                   ],
                 },
               })
@@ -530,6 +575,13 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         }
 
         if (query.data === "service:social_boost") {
+          clearUserState(user.userId);
+          await sendSocialBoostMenu(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (query.data === "social_boost:cancel") {
+          clearUserState(user.userId);
           await sendSocialBoostMenu(bot, chatId, user, { messageId });
           return true;
         }
@@ -550,7 +602,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         }
 
         if (query.data === "service:temporary_emails") {
-          clearUserState(user.userId);
           await sendTemporaryEmailsMenu(bot, chatId, user, { messageId });
           return true;
         }
@@ -570,46 +621,23 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           return true;
         }
 
-        if (query.data === "service_menu:virtual_numbers:offers:wa" || query.data === "service_menu:virtual_numbers:offers:tg") {
-          await sendServiceSelectionPlaceholder(bot, chatId, user, "Offers", {
-            messageId,
-            backCallback: "service:virtual_numbers",
-          });
+        if (query.data.startsWith("service_menu:social_boost:platform:")) {
+          clearUserState(user.userId);
+          const platformKey = query.data.split(":")[3];
+          await sendSocialBoostCategoriesMenu(bot, chatId, user, platformKey, { messageId });
           return true;
         }
 
-        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.split(":").length === 4) {
-          const providerKey = query.data.split(":")[3];
-          await sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, 0, { messageId });
+        if (query.data.startsWith("service_menu:social_boost:category:")) {
+          clearUserState(user.userId);
+          const [, , , platformKey, categoryKey] = query.data.split(":");
+          await sendSocialBoostServicesMenu(bot, chatId, user, platformKey, categoryKey, { messageId });
           return true;
         }
 
-        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.includes(":other:")) {
-          const parts = query.data.split(":");
-          const providerKey = parts[3];
-          const pageIndex = Number(parts[5]);
-          await sendVirtualNumbersProviderMenu(bot, chatId, user, providerKey, pageIndex, { messageId });
-          return true;
-        }
-
-        if (query.data.startsWith("service_menu:virtual_numbers:server:") && query.data.includes(":app:")) {
-          const parts = query.data.split(":");
-          const providerKey = parts[3];
-          const appName = decodeURIComponent(parts.slice(5).join(":"));
-          await sendGrizzlyCountriesMenu(bot, chatId, user, appName, 0, { messageId, providerKey });
-          return true;
-        }
-
-        if (query.data.startsWith("grizzly:")) {
-          const [, providerKey, , serviceKey, , pageRaw] = query.data.split(":");
-          const pageIndex = Number(pageRaw || 0);
-          await sendGrizzlyCountriesMenu(bot, chatId, user, serviceKey, pageIndex, { messageId, providerKey });
-          return true;
-        }
-
-        if (query.data.startsWith("grizzly:country:")) {
-          const [, , serviceKey, countryId] = query.data.split(":");
-          await sendGrizzlyCountryDetails(bot, chatId, user, serviceKey, countryId, { messageId });
+        if (query.data.startsWith("service_menu:social_boost:service:")) {
+          const [, , , platformKey, categoryKey, serviceId] = query.data.split(":");
+          await sendSocialBoostServiceDetails(bot, chatId, user, platformKey, categoryKey, serviceId, { messageId });
           return true;
         }
 
@@ -618,28 +646,18 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const normalized = appName.toLowerCase();
           const appKey = socialBoostKeyMap[normalized] || socialBoostKeyMap[normalized.replace(/[^a-z0-9]/g, "")];
           if (!appKey) {
-            await sendServiceSelectionPlaceholder(bot, chatId, user, appName, {
-              messageId,
-              backCallback: "service:social_boost",
-            });
+            await sendSocialBoostMenu(bot, chatId, user, { messageId });
             return true;
           }
 
-          await sendSocialBoostServicesMenu(bot, chatId, user, appKey, appName, { messageId });
+          await sendSocialBoostCategoriesMenu(bot, chatId, user, appKey, { messageId });
           return true;
         }
 
         if (query.data.startsWith("social_boost_service:")) {
-          const lang = getUserLang(user);
-          await safeTelegramCall("handleCallbackQuery.socialBoostService", () =>
-            bot.answerCallbackQuery(query.id, {
-              text: t(lang, "socialBoost_service_placeholder"),
-              show_alert: true,
-            })
-          );
+          await sendSocialBoostMenu(bot, chatId, user, { messageId });
           return true;
         }
-
         if (query.data.startsWith("service_menu:pro_accounts:category:")) {
           const categoryIndex = Number(query.data.split(":")[3]);
           const categoryMap = ["ai", "subscriptions", "verification"];
@@ -873,19 +891,20 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const services = appStore.getServices();
 
           if (!SERVICE_KEYS.includes(serviceKey) || !services[serviceKey]) {
-            await sendPlaceholderReply(bot, chatId, "قسم غير معروف", messageId);
+            await sendPlaceholderReply(bot, chatId, getUserLang(user) === "ar" ? "قسم غير معروف" : "Unknown section", messageId);
             return true;
           }
 
-          if (!services[serviceKey].enabled) {
+          const isEnabled = services[serviceKey].enabled !== false;
+          if (!isEnabled) {
             await safeTelegramCall("handleCallbackQuery.serviceDisabled", () =>
               bot.editMessageText(
-                `<b>=== ${services[serviceKey].name} ===</b>\n\nهذا القسم متوقف حالياً.`,
+                `<b>${getUserLang(user) === "ar" ? "الخدمة تحت الصيانة" : "Service under maintenance"}</b>`,
                 {
                   chat_id: chatId,
                   message_id: messageId,
                   parse_mode: "HTML",
-                  reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "menu:main" }]] },
+                  reply_markup: { inline_keyboard: [[{ text: t(getUserLang(user), "common_back"), callback_data: "menu:main" }]] },
                 }
               )
             );
@@ -907,4 +926,9 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 module.exports = {
   handleCallbackQuery,
 };
+
+
+
+
+
 

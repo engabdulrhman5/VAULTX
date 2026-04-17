@@ -1,12 +1,12 @@
 const { t } = require("../locales");
 
-function buildFeaturedRow(featuredCountry, providerKey, serviceCode) {
+function buildFeaturedRow(featuredCountry, providerKey, serviceCode, lang) {
   if (!featuredCountry) {
     return [];
   }
 
   return [[{
-    text: `الأرخص عالمياً | ${featuredCountry.text}`,
+    text: `${t(lang, "grizzly_featured_best")} ${featuredCountry.text}`,
     callback_data: `buy_num_${providerKey}_${serviceCode}_${featuredCountry.id}_${featuredCountry.price}`,
   }]];
 }
@@ -47,7 +47,7 @@ function buildPaginationRow(page, totalPages, providerKey, serviceCode, lang) {
 
 function getGrizzlyCountriesKeyboard(countries, providerKey, serviceCode, page, totalPages, lang, featuredCountry = null) {
   const rows = [
-    ...buildFeaturedRow(featuredCountry, providerKey, serviceCode),
+    ...buildFeaturedRow(featuredCountry, providerKey, serviceCode, lang),
     ...buildCountryRows(countries, providerKey, serviceCode),
     ...buildPaginationRow(page, totalPages, providerKey, serviceCode, lang),
     [{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }],
