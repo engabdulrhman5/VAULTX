@@ -1,4 +1,5 @@
 require("dotenv").config();
+const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
 const { BOT_TOKEN } = require("./config");
 const { AppStore } = require("./services/appStore");
@@ -35,6 +36,20 @@ const {
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
+}
+
+const renderPort = Number(process.env.PORT || 0);
+if (Number.isFinite(renderPort) && renderPort > 0) {
+  http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    if (req.url === "/") {
+      res.end("I am alive");
+      return;
+    }
+    res.end("OK");
+  }).listen(renderPort, "0.0.0.0", () => {
+    console.log(`[web] health endpoint listening on :${renderPort}`);
+  });
 }
 
 const telegramProxyUrl = String(process.env.TELEGRAM_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
