@@ -44,10 +44,15 @@ const {
   sendTempEmailSession,
   getMockTempEmailMessages,
   sendVirtualVisaMenu,
-  sendGameTopupMenu,
   sendOtherServicesMenu,
   sendCustomServicePrompt,
 } = require("../services/serviceMenusService");
+const {
+  sendGameTopupCategoriesMenu,
+  sendGameTopupGamesMenu,
+  sendGameTopupPackagesMenu,
+  startGameTopupIdInput,
+} = require("../services/gameTopupFlowService");
 const { sendGrizzlyCountriesMenu, sendGrizzlyCountryDetails } = require("../services/grizzlyMenuService");
 const { requestNumber, getSmsStatus, cancelNumber } = require("../services/grizzlyService");
 const { getTempEmailActionsKeyboard } = require("../keyboards/serviceMenusKeyboard");
@@ -612,7 +617,8 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         }
 
         if (query.data === "service:game_topup") {
-          await sendGameTopupMenu(bot, chatId, user, 0, { messageId });
+          clearUserState(user.userId);
+          await sendGameTopupCategoriesMenu(bot, chatId, user, { messageId });
           return true;
         }
 
@@ -789,25 +795,50 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:page:")) {
-          const pageIndex = Number(query.data.split(":")[3]);
-          await sendGameTopupMenu(bot, chatId, user, pageIndex, { messageId });
+        if (query.data.startsWith("service_menu:game_topup:category:")) {
+          const parts = query.data.split(":");
+          const categoryKey = String(parts[3] || "");
+          const pageIndex = Number(parts[5] || 0);
+          await sendGameTopupGamesMenu(bot, chatId, user, categoryKey, pageIndex, { messageId });
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:item:")) {
-          const [, , , pageIndexRaw, itemIndexRaw] = query.data.split(":");
-          const pageIndex = Number(pageIndexRaw);
-          const itemIndex = Number(itemIndexRaw);
-          const itemName = getArray(getUserLang(user), "games_list")[pageIndex * 10 + itemIndex];
-          if (!itemName) {
-            await sendGameTopupMenu(bot, chatId, user, 0, { messageId });
-            return true;
-          }
-          await sendServiceSelectionPlaceholder(bot, chatId, user, `Game Top-up | ${itemName}`, {
-            messageId,
-            backCallback: "service:game_topup",
-          });
+        if (query.data.startsWith("service_menu:game_topup:game:")) {
+          const parts = query.data.split(":");
+          const gameKey = String(parts[3] || "");
+          const categoryKey = String(parts[5] || "");
+          const pageIndex = Number(parts[7] || 0);
+          await sendGameTopupPackagesMenu(bot, chatId, user, gameKey, categoryKey, pageIndex, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:game_topup:package:")) {
+          const parts = query.data.split(":");
+          const gameKey = String(parts[3] || "");
+          const packageIndex = Number(parts[4] || 0);
+          const categoryKey = String(parts[6] || "");
+          const pageIndex = Number(parts[8] || 0);
+          await startGameTopupIdInput(bot, chatId, user, {
+            gameKey,
+            packageIndex,
+            categoryKey,
+            pageIndex,
+            isCustom: false,
+          }, { messageId });
+          return true;
+        }
+
+        if (query.data.startsWith("service_menu:game_topup:custom:")) {
+          const parts = query.data.split(":");
+          const gameKey = String(parts[3] || "");
+          const categoryKey = String(parts[5] || "");
+          const pageIndex = Number(parts[7] || 0);
+          await startGameTopupIdInput(bot, chatId, user, {
+            gameKey,
+            categoryKey,
+            pageIndex,
+            isCustom: true,
+          }, { messageId });
           return true;
         }
 
