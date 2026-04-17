@@ -266,10 +266,12 @@ function getGameTopupKeyboard(items, pageIndex, totalPages, lang = "ar") {
 }
 
 function getGameTopupCategoriesKeyboard(categories, lang = "ar") {
-  const rows = chunkButtons(categories, (category) => ({
-    text: `${category.emoji} ${lang === "ar" ? category.name_ar : category.name_en}`,
-    callback_data: `service_menu:game_topup:category:${category.key}:page:0`,
-  }));
+  const rows = categories.map((category) => ([
+    {
+      text: `${category.emoji} ${lang === "ar" ? category.name_ar : category.name_en}`,
+      callback_data: `gt:cat:${category.key}:0`,
+    },
+  ]));
 
   rows.push([{ text: t(lang, "common_back_main"), callback_data: "menu:main" }]);
   return { inline_keyboard: rows };
@@ -278,16 +280,16 @@ function getGameTopupCategoriesKeyboard(categories, lang = "ar") {
 function getGameTopupGamesKeyboard(games, categoryKey, pageIndex, totalPages, lang = "ar") {
   const rows = chunkButtons(games, (game) => ({
     text: `${game.emoji} ${lang === "ar" ? game.name_ar : game.name_en}`,
-    callback_data: `service_menu:game_topup:game:${game.key}:cat:${categoryKey}:page:${pageIndex}`,
+    callback_data: `gt:g:${game.key}:${categoryKey}:${pageIndex}`,
   }));
 
   const paginationRow = [];
   if (pageIndex > 0) {
-    paginationRow.push({ text: lang === "ar" ? "⬅️ السابق" : "⬅️ Previous", callback_data: `service_menu:game_topup:category:${categoryKey}:page:${pageIndex - 1}` });
+    paginationRow.push({ text: lang === "ar" ? "⬅️ السابق" : "⬅️ Previous", callback_data: `gt:cat:${categoryKey}:${pageIndex - 1}` });
   }
   paginationRow.push({ text: lang === "ar" ? "🔙 الأقسام" : "🔙 Categories", callback_data: "service:game_topup" });
   if (pageIndex < totalPages - 1) {
-    paginationRow.push({ text: lang === "ar" ? "التالي ➡️" : "Next ➡️", callback_data: `service_menu:game_topup:category:${categoryKey}:page:${pageIndex + 1}` });
+    paginationRow.push({ text: lang === "ar" ? "التالي ➡️" : "Next ➡️", callback_data: `gt:cat:${categoryKey}:${pageIndex + 1}` });
   }
   rows.push(paginationRow);
   rows.push([{ text: t(lang, "common_back_main"), callback_data: "menu:main" }]);
@@ -303,15 +305,15 @@ function getGameTopupPackagesKeyboard(game, categoryKey, pageIndex, lang = "ar")
   ];
 
   game.packages.forEach((item, index) => {
-    const callback = `service_menu:game_topup:package:${game.key}:${index}:cat:${categoryKey}:page:${pageIndex}`;
+    const callback = `gt:p:${game.key}:${index}:${categoryKey}:${pageIndex}`;
     rows.push([
       { text: lang === "ar" ? item.units_ar : item.units_en, callback_data: callback },
       { text: `${Number(item.priceRub).toFixed(2)} ₽`, callback_data: callback },
     ]);
   });
 
-  rows.push([{ text: lang === "ar" ? "🛠️ شحن مخصص" : "🛠️ Custom Top-up", callback_data: `service_menu:game_topup:custom:${game.key}:cat:${categoryKey}:page:${pageIndex}` }]);
-  rows.push([{ text: lang === "ar" ? "🔙 العودة للألعاب" : "🔙 Back to games", callback_data: `service_menu:game_topup:category:${categoryKey}:page:${pageIndex}` }]);
+  rows.push([{ text: lang === "ar" ? "🛠️ شحن مخصص" : "🛠️ Custom Top-up", callback_data: `gt:c:${game.key}:${categoryKey}:${pageIndex}` }]);
+  rows.push([{ text: lang === "ar" ? "🔙 العودة للألعاب" : "🔙 Back to games", callback_data: `gt:cat:${categoryKey}:${pageIndex}` }]);
   rows.push([{ text: t(lang, "common_back_main"), callback_data: "menu:main" }]);
 
   return { inline_keyboard: rows };

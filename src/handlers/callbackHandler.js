@@ -795,29 +795,29 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:category:")) {
+        if (query.data.startsWith("gt:cat:")) {
           const parts = query.data.split(":");
-          const categoryKey = String(parts[3] || "");
-          const pageIndex = Number(parts[5] || 0);
+          const categoryKey = String(parts[2] || "");
+          const pageIndex = Number(parts[3] || 0);
           await sendGameTopupGamesMenu(bot, chatId, user, categoryKey, pageIndex, { messageId });
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:game:")) {
+        if (query.data.startsWith("gt:g:")) {
           const parts = query.data.split(":");
-          const gameKey = String(parts[3] || "");
-          const categoryKey = String(parts[5] || "");
-          const pageIndex = Number(parts[7] || 0);
+          const gameKey = String(parts[2] || "");
+          const categoryKey = String(parts[3] || "");
+          const pageIndex = Number(parts[4] || 0);
           await sendGameTopupPackagesMenu(bot, chatId, user, gameKey, categoryKey, pageIndex, { messageId });
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:package:")) {
+        if (query.data.startsWith("gt:p:")) {
           const parts = query.data.split(":");
-          const gameKey = String(parts[3] || "");
-          const packageIndex = Number(parts[4] || 0);
-          const categoryKey = String(parts[6] || "");
-          const pageIndex = Number(parts[8] || 0);
+          const gameKey = String(parts[2] || "");
+          const packageIndex = Number(parts[3] || 0);
+          const categoryKey = String(parts[4] || "");
+          const pageIndex = Number(parts[5] || 0);
           await startGameTopupIdInput(bot, chatId, user, {
             gameKey,
             packageIndex,
@@ -828,11 +828,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           return true;
         }
 
-        if (query.data.startsWith("service_menu:game_topup:custom:")) {
+        if (query.data.startsWith("gt:c:")) {
           const parts = query.data.split(":");
-          const gameKey = String(parts[3] || "");
-          const categoryKey = String(parts[5] || "");
-          const pageIndex = Number(parts[7] || 0);
+          const gameKey = String(parts[2] || "");
+          const categoryKey = String(parts[3] || "");
+          const pageIndex = Number(parts[4] || 0);
           await startGameTopupIdInput(bot, chatId, user, {
             gameKey,
             categoryKey,
