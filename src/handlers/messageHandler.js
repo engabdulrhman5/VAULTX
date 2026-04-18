@@ -17,6 +17,7 @@ const { getUserLang } = require("../locales");
 const { handleVirtualNumbersTextInput } = require("../services/virtualNumbersFlowService");
 const { handleSocialBoostTextInput } = require("../services/serviceMenusService");
 const { handleGameTopupTextInput } = require("../services/gameTopupFlowService");
+const { handleProAccountsTextInput } = require("../services/proAccountsFlowService");
 
 async function exportUsersList(bot, chatId, appStore) {
   try {
@@ -380,6 +381,11 @@ async function handleTextMessage(bot, msg, appStore) {
 
     const gameTopupHandled = await handleGameTopupTextInput(bot, msg, appStore);
     if (gameTopupHandled) {
+      return;
+    }
+
+    const proAccountsHandled = await handleProAccountsTextInput(bot, msg, appStore);
+    if (proAccountsHandled) {
       return;
     }
 

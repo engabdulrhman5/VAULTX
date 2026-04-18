@@ -212,6 +212,24 @@ class AppStore {
       .find((tx) => String(tx.activationId || "") === String(activationId || ""));
   }
 
+  getTransactionById(transactionId) {
+    return this.transactions.find((tx) => String(tx.id) === String(transactionId)) || null;
+  }
+
+  updateTransactionById(transactionId, updates = {}) {
+    const index = this.transactions.findIndex((tx) => String(tx.id) === String(transactionId));
+    if (index === -1) {
+      return null;
+    }
+
+    this.transactions[index] = {
+      ...this.transactions[index],
+      ...updates,
+    };
+    this.persistAll();
+    return this.transactions[index];
+  }
+
   markActivationNotified(activationId) {
     const index = [...this.transactions]
       .map((tx, idx) => ({ tx, idx }))

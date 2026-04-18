@@ -32,8 +32,6 @@ const {
   sendSocialBoostCategoriesMenu,
   sendSocialBoostServicesMenu,
   sendSocialBoostServiceDetails,
-  sendProAccountsMenu,
-  sendProSubcategoryMenu,
   sendSocialAccountsMenu,
   sendSocialAccountsPlatformsMenu,
   sendServiceSelectionPlaceholder,
@@ -47,6 +45,7 @@ const {
   sendOtherServicesMenu,
   sendCustomServicePrompt,
 } = require("../services/serviceMenusService");
+const { sendProAccountsHome, handleProAccountsCallback } = require("../services/proAccountsFlowService");
 const {
   sendGameTopupCategoriesMenu,
   sendGameTopupGamesMenu,
@@ -294,6 +293,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
       return false;
     }
 
+    const proHandled = await handleProAccountsCallback(bot, query, appStore);
+    if (proHandled) {
+      return true;
+    }
+
     await safeTelegramCall("handleCallbackQuery.answer", () => bot.answerCallbackQuery(query.id));
     if (query.data === "noop") {
       return true;
@@ -301,7 +305,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
     const user = appStore.getOrCreateUser(query.from);
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
-    const proCategoryIndexMap = { ai: 0, subscriptions: 1, verification: 2 };
     const socialCategoryLabels = getArray(getUserLang(user), "socialAccounts_categories").reduce((acc, item) => {
       if (item && item.key) {
         acc[item.key] = item.label;
@@ -592,7 +595,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         }
 
         if (query.data === "service:pro_accounts") {
-          await sendProAccountsMenu(bot, chatId, user, { messageId });
+          await sendProAccountsHome(bot, chatId, user, { messageId });
           return true;
         }
 
@@ -664,32 +667,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           await sendSocialBoostMenu(bot, chatId, user, { messageId });
           return true;
         }
-        if (query.data.startsWith("service_menu:pro_accounts:category:")) {
-          const categoryIndex = Number(query.data.split(":")[3]);
-          const categoryMap = ["ai", "subscriptions", "verification"];
-          await sendProSubcategoryMenu(bot, chatId, user, categoryMap[categoryIndex], { messageId });
-          return true;
-        }
-
-        if (query.data.startsWith("service_menu:pro_accounts:item:")) {
-          const [, , , subcategoryKey, itemIndexRaw] = query.data.split(":");
-          const proMap = {
-            ai: getArray(getUserLang(user), "proAccounts_ai"),
-            subscriptions: getArray(getUserLang(user), "proAccounts_subscriptions"),
-            verification: getArray(getUserLang(user), "proAccounts_verification"),
-          };
-          const itemName = proMap[subcategoryKey]?.[Number(itemIndexRaw)];
-          if (!itemName) {
-            await sendProSubcategoryMenu(bot, chatId, user, subcategoryKey, { messageId });
-            return true;
-          }
-          await sendServiceSelectionPlaceholder(bot, chatId, user, `Pro Accounts | ${itemName}`, {
-            messageId,
-            backCallback: `service_menu:pro_accounts:category:${proCategoryIndexMap[subcategoryKey] ?? 0}`,
-          });
-          return true;
-        }
-
         if (query.data.startsWith("service_menu:social_accounts:category:")) {
           const categoryKey = query.data.split(":")[3];
           await sendSocialAccountsPlatformsMenu(bot, chatId, user, categoryKey, { messageId });
