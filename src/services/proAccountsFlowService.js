@@ -324,6 +324,16 @@ function chunk(items, perRow = 2) {
   return rows;
 }
 
+function uniqueBy(items, keySelector) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const key = keySelector(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function findCategory(categoryKey) {
   return PRO_CATALOG.find((item) => item.key === categoryKey) || null;
 }
@@ -350,32 +360,35 @@ function buildCategoryKeyboard(lang) {
 }
 
 function buildAppsKeyboard(lang, category) {
-  const rows = chunk(category.apps, 2).map((row) => row.map((app) => ({
+  const apps = uniqueBy(category.apps, (item) => item.key);
+  const rows = chunk(apps, 2).map((row) => row.map((app) => ({
     text: getLabel(lang, app),
-    callback_data: `pro:app:${app.key}`,
+    callback_data: `pro:app:${category.key}:${app.key}`,
   })));
   rows.push([{ text: getTexts(lang).back, callback_data: "service:pro_accounts" }]);
   return { inline_keyboard: rows };
 }
 
-function buildPlansKeyboard(lang, app) {
-  const rows = chunk(app.plans, 2).map((row) => row.map((plan) => ({
+function buildPlansKeyboard(lang, category, app) {
+  const plans = uniqueBy(app.plans, (item) => item.key);
+  const rows = chunk(plans, 2).map((row) => row.map((plan) => ({
     text: getLabel(lang, plan),
-    callback_data: `pro:plan:${plan.key}`,
+    callback_data: `pro:plan:${category.key}:${app.key}:${plan.key}`,
   })));
   rows.push([{ text: getTexts(lang).back, callback_data: "pro:back:apps" }]);
   return { inline_keyboard: rows };
 }
 
-function buildDurationsKeyboard(lang, plan) {
+function buildDurationsKeyboard(lang, category, app, plan) {
   const texts = getTexts(lang);
   const rows = [[
     { text: texts.priceHeader, callback_data: "noop" },
     { text: texts.durationHeader, callback_data: "noop" },
   ]];
 
-  for (const duration of plan.durations) {
-    const callback = `pro:dur:${duration.key}`;
+  const durations = uniqueBy(plan.durations, (item) => item.key);
+  for (const duration of durations) {
+    const callback = `pro:dur:${category.key}:${app.key}:${plan.key}:${duration.key}`;
     rows.push([
       { text: `${duration.price}$`, callback_data: callback },
       { text: lang === "ar" ? duration.label_ar : duration.label_en, callback_data: callback },
@@ -474,11 +487,11 @@ async function sendAppsMenu(bot, chatId, user, categoryKey, options = {}) {
   );
 }
 
-async function sendPlansMenu(bot, chatId, user, appKey, options = {}) {
+async function sendPlansMenu(bot, chatId, user, categoryKey, appKey, options = {}) {
   const lang = getUserLang(user);
   const texts = getTexts(lang);
   const state = getProState(user.userId);
-  const category = findCategory(state?.categoryKey);
+  const category = findCategory(categoryKey || state?.categoryKey);
   const app = findApp(category, appKey);
 
   if (!category || !app) {
@@ -491,18 +504,18 @@ async function sendPlansMenu(bot, chatId, user, appKey, options = {}) {
     bot,
     chatId,
     applyTemplate(texts.planSelection, { app: escapeHtml(getLabel(lang, app)) }),
-    buildPlansKeyboard(lang, app),
+    buildPlansKeyboard(lang, category, app),
     options.messageId,
     "sendProAccounts.plans"
   );
 }
 
-async function sendDurationsMenu(bot, chatId, user, planKey, options = {}) {
+async function sendDurationsMenu(bot, chatId, user, categoryKey, appKey, planKey, options = {}) {
   const lang = getUserLang(user);
   const texts = getTexts(lang);
   const state = getProState(user.userId);
-  const category = findCategory(state?.categoryKey);
-  const app = findApp(category, state?.appKey);
+  const category = findCategory(categoryKey || state?.categoryKey);
+  const app = findApp(category, appKey || state?.appKey);
   const plan = findPlan(app, planKey);
 
   if (!category || !app || !plan) {
@@ -515,7 +528,7 @@ async function sendDurationsMenu(bot, chatId, user, planKey, options = {}) {
     bot,
     chatId,
     applyTemplate(texts.durationSelection, { plan: escapeHtml(getLabel(lang, plan)) }),
-    buildDurationsKeyboard(lang, plan),
+    buildDurationsKeyboard(lang, category, app, plan),
     options.messageId,
     "sendProAccounts.durations"
   );
@@ -542,13 +555,13 @@ function buildDraft(lang, category, app, plan, duration, method, userInput) {
   };
 }
 
-async function sendActivationStep(bot, chatId, user, durationKey, options = {}) {
+async function sendActivationStep(bot, chatId, user, categoryKey, appKey, planKey, durationKey, options = {}) {
   const lang = getUserLang(user);
   const texts = getTexts(lang);
   const state = getProState(user.userId);
-  const category = findCategory(state?.categoryKey);
-  const app = findApp(category, state?.appKey);
-  const plan = findPlan(app, state?.planKey);
+  const category = findCategory(categoryKey || state?.categoryKey);
+  const app = findApp(category, appKey || state?.appKey);
+  const plan = findPlan(app, planKey || state?.planKey);
   const duration = findDuration(plan, durationKey);
 
   if (!category || !app || !plan || !duration) {
@@ -628,7 +641,7 @@ async function handleMethodSelection(bot, query, appStore, method) {
       bot,
       query.message.chat.id,
       texts.inputPrompt,
-      { inline_keyboard: [[{ text: texts.back, callback_data: "pro:back:methods" }]] },
+      { inline_keyboard: [[{ text: texts.back, callback_data: `pro:back:methods:${category.key}:${app.key}:${plan.key}:${duration.key}` }]] },
       query.message.message_id,
       "sendProAccounts.awaitCredentials"
     );
@@ -771,7 +784,7 @@ async function handleAdminExecution(bot, query, appStore) {
 
 async function handleProAccountsCallback(bot, query, appStore) {
   try {
-    if (!query.data || !query.data.startsWith("pro:")) {
+    if (!query.data || (!query.data.startsWith("pro:") && !query.data.startsWith("service_menu:pro_accounts:"))) {
       return false;
     }
 
@@ -780,10 +793,21 @@ async function handleProAccountsCallback(bot, query, appStore) {
     const user = appStore.getOrCreateUser(query.from);
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
-    const data = String(query.data);
+    let data = String(query.data);
+    if (data.startsWith("service_menu:pro_accounts:category:")) {
+      const idx = Number(data.split(":")[3]);
+      const categoryMap = ["ai_tools", "entertainment", "verification_badges"];
+      data = `pro:cat:${categoryMap[idx] || "ai_tools"}`;
+    } else if (data.startsWith("service_menu:pro_accounts:item:")) {
+      data = "service:pro_accounts";
+    }
 
     if (data.startsWith("pro:exec:")) {
       return handleAdminExecution(bot, query, appStore);
+    }
+
+    if (data === "service:pro_accounts") {
+      return sendProAccountsHome(bot, chatId, user, { messageId }).then(() => true);
     }
 
     if (data.startsWith("pro:cat:")) {
@@ -791,15 +815,18 @@ async function handleProAccountsCallback(bot, query, appStore) {
     }
 
     if (data.startsWith("pro:app:")) {
-      return sendPlansMenu(bot, chatId, user, data.split(":")[2], { messageId }).then(() => true);
+      const parts = data.split(":");
+      return sendPlansMenu(bot, chatId, user, parts[2], parts[3], { messageId }).then(() => true);
     }
 
     if (data.startsWith("pro:plan:")) {
-      return sendDurationsMenu(bot, chatId, user, data.split(":")[2], { messageId }).then(() => true);
+      const parts = data.split(":");
+      return sendDurationsMenu(bot, chatId, user, parts[2], parts[3], parts[4], { messageId }).then(() => true);
     }
 
     if (data.startsWith("pro:dur:")) {
-      return sendActivationStep(bot, chatId, user, data.split(":")[2], { messageId }).then(() => true);
+      const parts = data.split(":");
+      return sendActivationStep(bot, chatId, user, parts[2], parts[3], parts[4], parts[5], { messageId }).then(() => true);
     }
 
     if (data === "pro:meth:personal") {
@@ -821,29 +848,37 @@ async function handleProAccountsCallback(bot, query, appStore) {
 
     if (data === "pro:back:plans") {
       const state = getProState(user.userId);
-      return sendPlansMenu(bot, chatId, user, state?.appKey, { messageId }).then(() => true);
+      return sendPlansMenu(bot, chatId, user, state?.categoryKey, state?.appKey, { messageId }).then(() => true);
     }
 
     if (data === "pro:back:durations") {
       const state = getProState(user.userId);
-      return sendDurationsMenu(bot, chatId, user, state?.planKey, { messageId }).then(() => true);
+      return sendDurationsMenu(bot, chatId, user, state?.categoryKey, state?.appKey, state?.planKey, { messageId }).then(() => true);
     }
 
-    if (data === "pro:back:methods") {
+    if (data === "pro:back:methods" || data.startsWith("pro:back:methods:")) {
       const state = getProState(user.userId);
       if (!state) return sendProAccountsHome(bot, chatId, user, { messageId }).then(() => true);
+      const routeParts = data.split(":");
+      const routeCategoryKey = routeParts[3];
+      const routeAppKey = routeParts[4];
+      const routePlanKey = routeParts[5];
+      const routeDurationKey = routeParts[6];
 
       if (state.name === "PRO_AWAIT_CREDENTIALS") {
         setFlowState(user.userId, {
-          categoryKey: state.categoryKey,
-          appKey: state.appKey,
-          planKey: state.planKey,
-          durationKey: state.durationKey,
+          categoryKey: routeCategoryKey || state.categoryKey,
+          appKey: routeAppKey || state.appKey,
+          planKey: routePlanKey || state.planKey,
+          durationKey: routeDurationKey || state.durationKey,
         });
       }
 
-      const durationKey = state.durationKey || state?.draft?.durationKey;
-      return sendActivationStep(bot, chatId, user, durationKey, { messageId }).then(() => true);
+      const categoryKey = routeCategoryKey || state.categoryKey || state?.draft?.categoryKey;
+      const appKey = routeAppKey || state.appKey || state?.draft?.appKey;
+      const planKey = routePlanKey || state.planKey || state?.draft?.planKey;
+      const durationKey = routeDurationKey || state.durationKey || state?.draft?.durationKey;
+      return sendActivationStep(bot, chatId, user, categoryKey, appKey, planKey, durationKey, { messageId }).then(() => true);
     }
 
     return true;
