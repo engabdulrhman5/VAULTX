@@ -7,6 +7,19 @@ const { setUserState, getUserState, clearUserState } = require("./stateStore");
 const { escapeHtml } = require("../utils/formatters");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
+const FRAME = "━━━━━━━━━━━━━━━━━━━━";
+
+function vaultCard(title, lines, footer) {
+  return [
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    FRAME,
+    title,
+    ...lines,
+    FRAME,
+    footer,
+  ].join("\n");
+}
+
 const PRO_TEXTS = {
   ar: {
     mainMenu: "✨ مرحباً بك في قسم حسابات Pro!\n🔒 اشتراكات رسمية وآمنة 100%\n🛡️ ضمان كامل طوال فترة الاشتراك\n⬇️ يرجى اختيار القسم المطلوب:",
@@ -313,6 +326,82 @@ function getTexts(lang) {
   return PRO_TEXTS[lang] || PRO_TEXTS.ar;
 }
 
+function getCategoryAppsCard(lang, category) {
+  const key = category?.key;
+  if (lang === "ar") {
+    if (key === "ai_tools") {
+      return vaultCard(
+        "♦️ ❨ أدوات الـذكـــاء الاصـطـنـاعـي ❩ ♦️",
+        [
+          "💡 أقوى نماذج الذكاء الاصطناعي بين يديك.",
+          "💡 إنجاز المهام، البرمجة، وتوليد الصور باحترافية.",
+          "💡 حسابات بريميوم رسمية بدون انقطاع.",
+        ],
+        "⬇️ يرجى اختيار الأداة التي ترغب بالاشتراك بها ⬇️"
+      );
+    }
+    if (key === "entertainment") {
+      return vaultCard(
+        "♦️ ❨ الـتـرفـيـــه والـمـنـصـــات ❩ ♦️",
+        [
+          "💡 استمتع بمشاهدة أفلامك ومسلسلاتك المفضلة.",
+          "💡 جودة بث عالية (4K) وبدون إعلانات مزعجة.",
+          "💡 اشتراكات آمنة ومضمونة طوال فترة الاستخدام.",
+        ],
+        "⬇️ يرجى اختيار منصة الترفيه التي تود الاشتراك بها ⬇️"
+      );
+    }
+    if (key === "verification_badges") {
+      return vaultCard(
+        "♦️ ❨ شـــارات الـتـوثـيـــق ❩ ♦️",
+        [
+          "💡 نوفر خطط توثيق رسمية للمنصات الأكثر استخداماً.",
+          "💡 تفعيل آمن ومتابعة دقيقة حتى اكتمال الطلب.",
+          "💡 سرعة تنفيذ وجودة عالية مع دعم مباشر.",
+        ],
+        "⬇️ يرجى اختيار المنصة التي تريد توثيقها ⬇️"
+      );
+    }
+  } else {
+    if (key === "ai_tools") {
+      return vaultCard(
+        "♦️ ❨ A I TOOLS ❩ ♦️",
+        [
+          "💡 Access top AI models in one place.",
+          "💡 Coding, writing, and image generation at pro level.",
+          "💡 Official premium subscriptions with stable access.",
+        ],
+        "⬇️ Please select the AI tool you want to subscribe to ⬇️"
+      );
+    }
+    if (key === "entertainment") {
+      return vaultCard(
+        "♦️ ❨ ENTERTAINMENT PLATFORMS ❩ ♦️",
+        [
+          "💡 Enjoy your favorite movies and series.",
+          "💡 High-quality streaming with no annoying ads.",
+          "💡 Safe subscriptions with full period warranty.",
+        ],
+        "⬇️ Please select the entertainment platform ⬇️"
+      );
+    }
+    if (key === "verification_badges") {
+      return vaultCard(
+        "♦️ ❨ VERIFICATION BADGES ❩ ♦️",
+        [
+          "💡 Official badge plans for major social platforms.",
+          "💡 Secure activation flow with direct order tracking.",
+          "💡 Fast execution and premium support quality.",
+        ],
+        "⬇️ Please select the platform to verify ⬇️"
+      );
+    }
+  }
+
+  const texts = getTexts(lang);
+  return applyTemplate(texts.appSelection, { category: escapeHtml(getLabel(lang, category)) });
+}
+
 function getLabel(lang, item) {
   return lang === "ar" ? item.name_ar : item.name_en;
 }
@@ -469,7 +558,6 @@ async function sendProAccountsHome(bot, chatId, user, options = {}) {
 
 async function sendAppsMenu(bot, chatId, user, categoryKey, options = {}) {
   const lang = getUserLang(user);
-  const texts = getTexts(lang);
   const category = findCategory(categoryKey);
   if (!category) {
     return sendProAccountsHome(bot, chatId, user, options);
@@ -480,7 +568,7 @@ async function sendAppsMenu(bot, chatId, user, categoryKey, options = {}) {
   return sendOrEditMessage(
     bot,
     chatId,
-    applyTemplate(texts.appSelection, { category: escapeHtml(getLabel(lang, category)) }),
+    getCategoryAppsCard(lang, category),
     buildAppsKeyboard(lang, category),
     options.messageId,
     "sendProAccounts.apps"

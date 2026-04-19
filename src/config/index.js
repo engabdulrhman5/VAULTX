@@ -11,6 +11,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const LOG_CHANNEL_ID = Number(process.env.LOG_CHANNEL_ID || -1003822505585);
 const ACTIVATIONS_CHANNEL_ID = Number(process.env.ACTIVATIONS_CHANNEL_ID || -1003311851705);
 const PRO_ACCOUNTS_CHANNEL_ID = Number(process.env.PRO_ACCOUNTS_CHANNEL_ID || -1003869626536);
+const ADMIN_CHANNEL_ID = Number(process.env.ADMIN_CHANNEL_ID || PRO_ACCOUNTS_CHANNEL_ID);
 
 module.exports = {
   ADMIN_ID,
@@ -19,6 +20,7 @@ module.exports = {
   LOG_CHANNEL_ID,
   ACTIVATIONS_CHANNEL_ID,
   PRO_ACCOUNTS_CHANNEL_ID,
+  ADMIN_CHANNEL_ID,
   USERS_DB_PATH: path.join(__dirname, "..", "..", "data", "users.json"),
   CONFIG_DB_PATH: path.join(__dirname, "..", "..", "data", "config.json"),
   TRANSACTIONS_DB_PATH: path.join(__dirname, "..", "..", "data", "transactions.json"),

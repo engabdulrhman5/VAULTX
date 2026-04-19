@@ -47,6 +47,7 @@ const {
 } = require("../services/serviceMenusService");
 const { sendProAccountsHome, handleProAccountsCallback } = require("../services/proAccountsFlowService");
 const { sendCloudServicesHome, handleCloudServicesCallback } = require("../services/cloudServicesFlowService");
+const { handleDigitalServicesCallback } = require("../services/digitalServicesFlowService");
 const {
   sendGameTopupCategoriesMenu,
   sendGameTopupGamesMenu,
@@ -301,6 +302,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
     const cloudHandled = await handleCloudServicesCallback(bot, query, appStore);
     if (cloudHandled) {
+      return true;
+    }
+
+    const digitalHandled = await handleDigitalServicesCallback(bot, query, appStore);
+    if (digitalHandled) {
       return true;
     }
 

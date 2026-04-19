@@ -19,6 +19,7 @@ const { handleSocialBoostTextInput } = require("../services/serviceMenusService"
 const { handleGameTopupTextInput } = require("../services/gameTopupFlowService");
 const { handleProAccountsTextInput } = require("../services/proAccountsFlowService");
 const { handleCloudServicesTextInput } = require("../services/cloudServicesFlowService");
+const { handleDigitalServicesTextInput } = require("../services/digitalServicesFlowService");
 
 async function exportUsersList(bot, chatId, appStore) {
   try {
@@ -392,6 +393,11 @@ async function handleTextMessage(bot, msg, appStore) {
 
     const cloudServicesHandled = await handleCloudServicesTextInput(bot, msg, appStore);
     if (cloudServicesHandled) {
+      return;
+    }
+
+    const digitalServicesHandled = await handleDigitalServicesTextInput(bot, msg, appStore);
+    if (digitalServicesHandled) {
       return;
     }
 

@@ -6,19 +6,80 @@ const { logBotError } = require("./errorLogger");
 const { safeTelegramCall } = require("./telegramSafe");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
+const FRAME = "━━━━━━━━━━━━━━━━━━━━";
+
+function vaultCard(title, lines, footer) {
+  return [
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    FRAME,
+    title,
+    ...lines,
+    FRAME,
+    footer,
+  ].join("\n");
+}
+
 const TEXTS = {
   ar: {
     home: "☁️ <b>قسم الخدمات السحابية</b>\n━━━━━━━━━━━━━━\nاختر الخدمة التي تحتاجها من القائمة التالية:",
-    vpsOs: "🖥️ <b>خوادم VPS</b>\nتمتع بأداء عالي واستقرار تام.\nيرجى اختيار نظام التشغيل المطلوب:",
-    vpsLocation: "🌍 <b>موقع السيرفر</b>\nاقترب من عملائك لاختيار أفضل سرعة استجابة (Ping):",
+    vpsOs: vaultCard(
+      "♦️ ❨ خـــوادم V P S (الـنـظـام) ❩ ♦️",
+      [
+        "💡 خوادم سحابية ذات أداء عالي واستقرار تام.",
+        "💡 تحكم كامل (Root/Admin) بخادمك الخاص.",
+        "💡 اختر النظام المتوافق مع برمجياتك وبيئة عملك.",
+      ],
+      "⬇️ يرجى تحديد نظام التشغيل المطلوب للسيرفر ⬇️"
+    ),
+    vpsLocation: vaultCard(
+      "♦️ ❨ خـــوادم V P S (الـمـوقـع) ❩ ♦️",
+      [
+        "💡 موقع السيرفر يؤثر على سرعة الاستجابة (Ping).",
+        "💡 اختر أقرب موقع جغرافي لعملائك أو لمشروعك.",
+        "💡 جميع مراكز البيانات لدينا محمية ضد هجمات DDoS.",
+      ],
+      "⬇️ يرجى تحديد موقع السيرفر (الدولة) من القائمة ⬇️"
+    ),
     vpsPlans: "🚀 <b>مواصفات السيرفر</b>\n(النظام: {os}، الموقع: {location})\nاختر الباقة المناسبة لاحتياجاتك:",
-    domainPrompt: "🌐 <b>حجز نطاق جديد</b>\nللبدء، أرسل اسم النطاق كاملاً مع الامتداد في رسالة واحدة.\n\nمثال: <code>vaultx.com</code>",
-    domainAvailable: "✅ النطاق <code>{domain}</code> صالح للتسجيل!\nاختر مدة الحجز المطلوبة:",
-    hostingType: "☁️ <b>استضافة المواقع</b>\nاختر نوع الاستضافة المناسب لمشروعك:",
+    domainPrompt: vaultCard(
+      "♦️ ❨ حـجـــز نـطـــاق جـديـــد ❩ ♦️",
+      [
+        "💡 ابدأ بحجز اسم النطاق (Domain) لمشروعك.",
+        "💡 يجب أن يكون باللغة الإنجليزية وبدون مسافات.",
+        "💡 يرجى كتابة الامتداد معه (مثل: vaultx.com).",
+      ],
+      "⬇️ يرجى كتابة اسم النطاق وإرساله في رسالة الآن ⬇️"
+    ),
+    domainAvailable: vaultCard(
+      "♦️ ❨ مـــدة حـجـــز الـنـطـــاق ❩ ♦️",
+      [
+        "💡 النطاق <code>{domain}</code> الذي أدخلته متاح وقابل للتسجيل!",
+        "💡 كلما زادت مدة الحجز حصلت على خصم أكبر.",
+        "💡 النطاق سيكون ملكاً لك بالكامل بلوحة تحكم.",
+      ],
+      "⬇️ يرجى اختيار مدة حجز النطاق من القائمة أدناه ⬇️"
+    ),
+    hostingType: vaultCard(
+      "♦️ ❨ اسـتـضـافـــة الـمـواقـــع ❩ ♦️",
+      [
+        "💡 استضافات سريعة ومحمية تدعم أحدث التقنيات.",
+        "💡 لوحة تحكم cPanel لسهولة إدارة ملفاتك.",
+        "💡 نسخ احتياطي تلقائي لضمان أمان بياناتك.",
+      ],
+      "⬇️ يرجى اختيار نوع الاستضافة المناسب لمشروعك ⬇️"
+    ),
     hostingPlans: "📦 <b>خطط الاستضافة ({type})</b>",
     hostingDomainMode: "🔗 <b>إعداد النطاق (Domain)</b>\nكيف تريد ربط استضافتك؟",
     hostingAskDomain: "🌐 أرسل اسم النطاق الذي تريد ربطه بالاستضافة.",
-    vpnType: "🌍 <b>خدمات VPN</b>\nتصفح بأمان وبدون قيود عبر سيرفرات خاصة.",
+    vpnType: vaultCard(
+      "♦️ ❨ خـدمـــات V P N الـخـاصـة ❩ ♦️",
+      [
+        "💡 تصفح الإنترنت بأمان وبدون أي قيود أو حجب.",
+        "💡 ستحصل على مفتاح سيرفر خاص بك (غير مشترك).",
+        "💡 اتصال مشفر وسريع جداً ممتاز للألعاب والتصفح.",
+      ],
+      "⬇️ يرجى اختيار بروتوكول اتصال الـ VPN المطلوب ⬇️"
+    ),
     vpnDuration: "⏳ <b>اختر مدة اشتراك الـ VPN</b>",
     invoiceTitle: "🧾 <b>فاتورة تأكيد الطلب</b>",
     invoiceService: "🏷️ نوع الخدمة",
@@ -68,16 +129,64 @@ const TEXTS = {
   },
   en: {
     home: "☁️ <b>Cloud Services Section</b>\n━━━━━━━━━━━━━━\nChoose the service you need:",
-    vpsOs: "🖥️ <b>VPS Servers</b>\nHigh performance and stable uptime.\nChoose your operating system:",
-    vpsLocation: "🌍 <b>Server Location</b>\nChoose the nearest region for better ping:",
+    vpsOs: vaultCard(
+      "♦️ ❨ V P S SERVERS (OS) ❩ ♦️",
+      [
+        "💡 High-performance cloud servers with stable uptime.",
+        "💡 Full Root/Admin control over your private server.",
+        "💡 Pick the OS that matches your stack and workflow.",
+      ],
+      "⬇️ Please choose the server operating system ⬇️"
+    ),
+    vpsLocation: vaultCard(
+      "♦️ ❨ V P S SERVERS (LOCATION) ❩ ♦️",
+      [
+        "💡 Server location directly affects response latency (Ping).",
+        "💡 Choose the nearest region to your audience or project.",
+        "💡 All datacenters are protected against DDoS attacks.",
+      ],
+      "⬇️ Please choose the server location (country) ⬇️"
+    ),
     vpsPlans: "🚀 <b>Server Specs</b>\n(OS: {os}, Location: {location})\nChoose your plan:",
-    domainPrompt: "🌐 <b>Register New Domain</b>\nSend the full domain name with extension in one message.\n\nExample: <code>vaultx.com</code>",
-    domainAvailable: "✅ Domain <code>{domain}</code> is available!\nChoose registration period:",
-    hostingType: "☁️ <b>Web Hosting</b>\nChoose hosting type for your project:",
+    domainPrompt: vaultCard(
+      "♦️ ❨ REGISTER A NEW DOMAIN ❩ ♦️",
+      [
+        "💡 Start by reserving your project domain name.",
+        "💡 Use English letters only, with no spaces.",
+        "💡 Include extension (example: vaultx.com).",
+      ],
+      "⬇️ Send the domain name now in one message ⬇️"
+    ),
+    domainAvailable: vaultCard(
+      "♦️ ❨ DOMAIN REGISTRATION DURATION ❩ ♦️",
+      [
+        "💡 Domain <code>{domain}</code> is available for registration.",
+        "💡 Longer duration gives better discount options.",
+        "💡 Domain ownership stays fully under your control.",
+      ],
+      "⬇️ Please choose the registration period below ⬇️"
+    ),
+    hostingType: vaultCard(
+      "♦️ ❨ WEB HOSTING ❩ ♦️",
+      [
+        "💡 Fast and secure hosting with latest technologies.",
+        "💡 cPanel access for easy file and domain management.",
+        "💡 Automated backups to protect your data.",
+      ],
+      "⬇️ Please choose the hosting type for your project ⬇️"
+    ),
     hostingPlans: "📦 <b>Hosting Plans ({type})</b>",
     hostingDomainMode: "🔗 <b>Domain Setup</b>\nHow do you want to connect your hosting?",
     hostingAskDomain: "🌐 Send the domain name you want to connect.",
-    vpnType: "🌍 <b>VPN Services</b>\nPrivate secure access with cloud servers.",
+    vpnType: vaultCard(
+      "♦️ ❨ PRIVATE CLOUD V P N ❩ ♦️",
+      [
+        "💡 Browse securely with no restrictions or blocking.",
+        "💡 Get a private server key dedicated to your account.",
+        "💡 Encrypted high-speed connection for gaming and browsing.",
+      ],
+      "⬇️ Please choose the required VPN protocol ⬇️"
+    ),
     vpnDuration: "⏳ <b>Choose VPN duration</b>",
     invoiceTitle: "🧾 <b>Order Confirmation Invoice</b>",
     invoiceService: "🏷️ Service Type",
