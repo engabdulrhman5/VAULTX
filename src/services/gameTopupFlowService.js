@@ -20,6 +20,18 @@ const {
 } = require("../keyboards/serviceMenusKeyboard");
 
 const USD_TO_RUB = 30;
+const FRAME = "━━━━━━━━━━━━━━━━━━━";
+
+function topupCard(title, lines, footer) {
+  return [
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    FRAME,
+    title,
+    ...lines,
+    FRAME,
+    footer,
+  ].join("\n");
+}
 
 function tr(lang, ar, en) {
   return lang === "en" ? en : ar;
@@ -53,13 +65,29 @@ function buildGamesText(lang, category, balance) {
 }
 
 function buildPackagesText(lang, category, game, balance) {
-  return [
-    tr(lang, "âœ… <b>ط§ط®طھط± ط§ظ„ط¨ط§ظ‚ط©</b>", "âœ… <b>Select a package</b>"),
-    "",
-    `${tr(lang, "ًں“‚ ط§ظ„ظ‚ط³ظ…", "ًں“‚ Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
-    `${tr(lang, "ًںژ® ط§ظ„ظ„ط¹ط¨ط©", "ًںژ® Game")} : <b>${game.emoji} ${escapeHtml(gameName(lang, game))}</b>`,
-    `${tr(lang, "ًں’° ط±طµظٹط¯ظƒ", "ًں’° Your balance")} : <b>${formatRuble(balance)}</b>`,
-  ].join("\n");
+  if (lang === "ar") {
+    return topupCard(
+      "♦️ ❨ بـاقـــات الـشـحـــن والأسـعـــار ❩ ♦️",
+      [
+        `🎮 اللعبة: <b>${game.emoji} ${escapeHtml(gameName(lang, game))}</b>`,
+        "💡 تتوفر باقات ثابتة بأسعار مخفضة ومنافسة جداً.",
+        "💡 يمكنك اختيار (شحن مخصص) لتحديد كمية معينة.",
+        "💡 جميع الأسعار شاملة رسوم التحويل والتنفيذ.",
+      ],
+      "⬇️ يرجى تحديد الباقة أو كمية الشحن المطلوبة ⬇️"
+    );
+  }
+
+  return topupCard(
+    "♦️ ❨ TOP-UP PACKAGES & PRICES ❩ ♦️",
+    [
+      `🎮 Game: <b>${game.emoji} ${escapeHtml(gameName(lang, game))}</b>`,
+      "💡 Fixed discounted packages are available.",
+      "💡 You can pick Custom Top-up for a specific quantity.",
+      "💡 All prices include transfer and execution fees.",
+    ],
+    "⬇️ Please select a package or custom top-up amount ⬇️"
+  );
 }
 
 function buildFixedInfoRows(lang, packageItemRub) {
@@ -84,64 +112,116 @@ function buildFixedInfoRows(lang, packageItemRub) {
 }
 
 function buildInfoText(lang, game, packageItemRub) {
-  const amountLabel = packageItemRub
-    ? (lang === "ar" ? packageItemRub.units_ar : packageItemRub.units_en)
-    : tr(lang, "ط´ط­ظ† ظ…ط®طµطµ", "Custom top-up");
-  const priceLabel = packageItemRub ? priceRubLabel(packageItemRub.priceRub) : "-";
-
   if (lang === "ar") {
-    return [
-      `âœ… ظ…ط¹ظ„ظˆظ…ط§طھ ط§ظ„ط®ط¯ظ…ط©: ط´ط­ظ† <b>${escapeHtml(gameName(lang, game))}</b>`,
-      "",
-      `ًں’µ ط§ظ„ط³ط¹ط±: <b>${priceLabel}</b>`,
-      `ًںھھ ط§ظ„ظ…ط·ظ„ظˆط¨: <b>${escapeHtml(game.idLabelAr || "ID")}</b>`,
-      "",
-      `ًں“© ط£ط±ط³ظ„ ط§ظ„ط¢ظ† ${escapeHtml(game.idLabelAr || "ID")} ط§ظ„ط®ط§طµ ط¨ظƒ`,
-      "",
-      `â€¢ ${amountLabel} â€¢`,
-    ].join("\n");
+    return topupCard(
+      "♦️ ❨ مـعـــرف الـلاعـــب ( I D ) ❩ ♦️",
+      [
+        "💡 يرجى التأكد من نسخ المعرف (ID) بشكل صحيح.",
+        "💡 الشحن يتم عبر الآيدي فقط، ولا نطلب كلمة المرور.",
+        "💡 خطأ في إدخال الآيدي قد يؤدي لشحن حساب آخر!",
+      ],
+      "⬇️ يرجى إرسال الآيدي (ID) الخاص بك في رسالة ⬇️"
+    );
   }
 
-  return [
-    `âœ… Service info: Top-up <b>${escapeHtml(gameName(lang, game))}</b>`,
-    "",
-    `ًں’µ Price: <b>${priceLabel}</b>`,
-    `ًںھھ Required: <b>${escapeHtml(game.idLabelEn || "ID")}</b>`,
-    "",
-    `ًں“© Send your ${escapeHtml(game.idLabelEn || "ID")} now`,
-    "",
-    `â€¢ ${amountLabel} â€¢`,
-  ].join("\n");
+  return topupCard(
+    "♦️ ❨ PLAYER I D ❩ ♦️",
+    [
+      "💡 Make sure your player ID is copied correctly.",
+      "💡 Top-up is done by ID only, no password is required.",
+      "💡 Wrong ID may charge another account.",
+    ],
+    "⬇️ Please send your player ID in one message ⬇️"
+  );
 }
 
 function buildCustomAmountPrompt(lang, game) {
-  const unitLabel = lang === "ar" ? game.custom.unitLabelAr : game.custom.unitLabelEn;
+  const unitPriceRub = toRub(game.custom.unitPriceRub);
+  if (lang === "ar") {
+    return topupCard(
+      "♦️ ❨ الـشـحـــن الـمـخـصـــص ❩ ♦️",
+      [
+        "💡 لقد اخترت إدخال كمية الشحن يدوياً حسب رغبتك.",
+        `💡 سعر الوحدة: <b>${unitPriceRub}$</b> | الحد الأدنى: <b>${game.custom.min}</b>.`,
+        "💡 الرجاء إدخال أرقام صحيحة فقط (مثال: 500).",
+      ],
+      "⬇️ يرجى كتابة الكمية التي تريد شحنها وإرسالها الآن ⬇️"
+    );
+  }
+
+  return topupCard(
+    "♦️ ❨ CUSTOM TOP-UP ❩ ♦️",
+    [
+      "💡 You selected custom amount input.",
+      `💡 Unit price: <b>${unitPriceRub}$</b> | Minimum: <b>${game.custom.min}</b>.`,
+      "💡 Please send numbers only (example: 500).",
+    ],
+    "⬇️ Please type your desired amount and send it now ⬇️"
+  );
+}
+
+function buildConfirmationInvoiceText(lang, details) {
+  if (lang === "ar") {
+    return topupCard(
+      "♦️ ❨ فـاتـــورة تـأكـيـــد الـشـحـــن ❩ ♦️",
+      [
+        `🎮 اللعبة: <b>${details.gameName}</b> | 🆔 الآيدي: <code>${escapeHtml(details.playerId)}</code>`,
+        `📦 الباقة: <b>${escapeHtml(details.packageLabel)}</b> | 💰 السعر: <b>${details.totalPrice}$</b>`,
+        "💡 سيتم خصم الرصيد وتنفيذ الشحن فور التأكيد.",
+      ],
+      "⬇️ يرجى مراجعة بياناتك والضغط على تأكيد لإتمام الطلب ⬇️"
+    );
+  }
+
+  return topupCard(
+    "♦️ ❨ TOP-UP CONFIRMATION INVOICE ❩ ♦️",
+    [
+      `🎮 Game: <b>${details.gameName}</b> | 🆔 ID: <code>${escapeHtml(details.playerId)}</code>`,
+      `📦 Package: <b>${escapeHtml(details.packageLabel)}</b> | 💰 Price: <b>${details.totalPrice}$</b>`,
+      "💡 Balance will be deducted and order starts after confirmation.",
+    ],
+    "⬇️ Please review and press Confirm to place your order ⬇️"
+  );
+}
+
+function buildExecutionInvoiceText(lang, details) {
+  const done = tr(lang, "✅ تم التنفيذ", "✅ Completed");
   return [
-    tr(lang, "ًں› ï¸ڈ ط§ط®طھط±طھ ط§ظ„ط´ط­ظ† ط§ظ„ظ…ط®طµطµ", "ًں› ï¸ڈ You selected custom top-up"),
+    tr(lang, "🧾 فاتورة تنفيذ العملية", "🧾 Execution Invoice"),
     "",
-    `${tr(lang, "ًں“¦ ط§ظ„ظˆط­ط¯ط©", "ًں“¦ Unit")} : <b>${escapeHtml(unitLabel)}</b>`,
-    `${tr(lang, "ًں’° ط§ظ„ط³ط¹ط± ظ„ظ„ظˆط­ط¯ط©", "ًں’° Unit price")} : <b>${priceRubLabel(toRub(game.custom.unitPriceRub))}</b>`,
-    `${tr(lang, "ًں“‰ ط§ظ„ط­ط¯ ط§ظ„ط£ط¯ظ†ظ‰", "ًں“‰ Minimum")} : <b>${game.custom.min}</b>`,
-    `${tr(lang, "ًں“ˆ ط§ظ„ط­ط¯ ط§ظ„ط£ظ‚طµظ‰", "ًں“ˆ Maximum")} : <b>${game.custom.max}</b>`,
+    `➖ ${tr(lang, "رقم الطلب", "Order ID")} : <code>${details.orderId}</code>`,
+    `➖ ${tr(lang, "اللعبة", "Game")} : ${details.gameName}`,
+    `➖ ${tr(lang, "الآيدي", "ID")} : <code>${escapeHtml(details.playerId)}</code>`,
+    `➖ ${tr(lang, "الباقة", "Package")} : ${escapeHtml(details.packageLabel)}`,
+    `➖ ${tr(lang, "السعر", "Price")} : <b>${priceRubLabel(details.totalPrice)}</b>`,
     "",
-    tr(lang, "âœچï¸ڈ ط£ط±ط³ظ„ ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط·ظ„ظˆط¨ط© (ط£ط±ظ‚ط§ظ… ظپظ‚ط·)", "âœچï¸ڈ Send required quantity (numbers only)"),
+    `➖ ${tr(lang, "حالة التنفيذ", "Execution")} : <b>${done}</b>`,
+    `➖ ${tr(lang, "حالة المزود", "Provider")} : <b>${details.providerStatus}</b>`,
   ].join("\n");
 }
 
-function buildInvoiceText(lang, details) {
-  const done = tr(lang, "âœ… طھظ… ط§ظ„طھظ†ظپظٹط°", "âœ… Completed");
-  return [
-    tr(lang, "ًں§¾ ظپط§طھظˆط±ط© طھظ†ظپظٹط° ط§ظ„ط¹ظ…ظ„ظٹط©", "ًں§¾ Order Invoice"),
-    "",
-    `â‍– ${tr(lang, "ط±ظ‚ظ… ط§ظ„ط·ظ„ط¨", "Order ID")} : <code>${details.orderId}</code>`,
-    `â‍– ${tr(lang, "ط§ظ„ظ„ط¹ط¨ط©", "Game")} : ${details.gameName}`,
-    `â‍– ${tr(lang, "ط§ظ„ط¢ظٹط¯ظٹ", "ID")} : <code>${escapeHtml(details.playerId)}</code>`,
-    `â‍– ${tr(lang, "ط§ظ„ط¨ط§ظ‚ط©", "Package")} : ${escapeHtml(details.packageLabel)}`,
-    `â‍– ${tr(lang, "ط§ظ„ط³ط¹ط±", "Price")} : <b>${priceRubLabel(details.totalPrice)}</b>`,
-    "",
-    `â‍– ${tr(lang, "ط­ط§ظ„ط© ط§ظ„طھظ†ظپظٹط°", "Execution")} : <b>${done}</b>`,
-    `â‍– ${tr(lang, "ط­ط§ظ„ط© ط§ظ„ظ…ط²ظˆط¯", "Provider")} : <b>${details.providerStatus}</b>`,
-  ].join("\n");
+async function sendTopupConfirmationInvoice(bot, chatId, user, payload, options = {}) {
+  const lang = getUserLang(user);
+  setUserState(user.userId, "GAME_TOPUP_READY_CONFIRM", payload);
+
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildConfirmationInvoiceText(lang, {
+      gameName: `${payload.gameEmoji || "🎮"} ${payload.gameName}`,
+      playerId: payload.playerId,
+      packageLabel: payload.packageLabel,
+      totalPrice: Number(payload.totalPrice || 0).toFixed(2),
+    }),
+    {
+      inline_keyboard: [
+        [{ text: tr(lang, "✅ تأكيد الطلب", "✅ Confirm Order"), callback_data: "gt:confirm" }],
+        [{ text: tr(lang, "❌ إلغاء", "❌ Cancel"), callback_data: "gt:cancel" }],
+      ],
+    },
+    options.messageId,
+    "sendTopupConfirmationInvoice"
+  );
 }
 
 async function sendGameTopupCategoriesMenu(bot, chatId, user, options = {}) {
@@ -311,7 +391,7 @@ async function processTopupOrder(bot, msg, appStore, payload) {
   await safeTelegramCall("gameTopup.orderSuccess", () =>
     bot.sendMessage(
       msg.chat.id,
-      buildInvoiceText(lang, {
+      buildExecutionInvoiceText(lang, {
         orderId: orderResult.orderId,
         gameName: `${game.emoji} ${gameName(lang, game)}`,
         playerId: payload.playerId,
@@ -379,14 +459,17 @@ async function handleGameTopupTextInput(bot, msg, appStore) {
         return true;
       }
 
-      return processTopupOrder(bot, msg, appStore, {
+      await sendTopupConfirmationInvoice(bot, msg.chat.id, user, {
         gameKey: game.key,
+        gameName: gameName(lang, game),
+        gameEmoji: game.emoji,
         playerId: text,
         packageItem,
         quantity: 1,
         packageLabel: lang === "ar" ? packageItem.units_ar : packageItem.units_en,
         totalPrice: toRub(packageItem.priceRub),
       });
+      return true;
     }
 
     if (!/^\d+$/.test(text)) {
@@ -413,16 +496,65 @@ async function handleGameTopupTextInput(bot, msg, appStore) {
 
     const totalPrice = Number((quantity * toRub(game.custom.unitPriceRub)).toFixed(2));
     const unitLabel = lang === "ar" ? game.custom.unitLabelAr : game.custom.unitLabelEn;
-    return processTopupOrder(bot, msg, appStore, {
+    await sendTopupConfirmationInvoice(bot, msg.chat.id, user, {
       gameKey: game.key,
+      gameName: gameName(lang, game),
+      gameEmoji: game.emoji,
       playerId: state.playerId,
       quantity,
       packageLabel: `${quantity} ${unitLabel}`,
       totalPrice,
     });
+    return true;
   } catch (error) {
     logBotError("handleGameTopupTextInput", error, { userId: msg.from?.id });
     return false;
+  }
+}
+
+async function handleGameTopupCallback(bot, query, appStore) {
+  try {
+    const data = String(query.data || "");
+    if (data !== "gt:confirm" && data !== "gt:cancel") {
+      return false;
+    }
+
+    await safeTelegramCall("gameTopup.callback.answer", () => bot.answerCallbackQuery(query.id));
+
+    const user = appStore.getOrCreateUser(query.from);
+    const lang = getUserLang(user);
+    const state = getUserState(user.userId);
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+
+    if (data === "gt:cancel") {
+      clearUserState(user.userId);
+      await sendOrEditMessage(
+        bot,
+        chatId,
+        tr(lang, "❌ تم إلغاء الطلب.", "❌ Order canceled."),
+        { inline_keyboard: [[{ text: tr(lang, "🔙 رجوع", "🔙 Back"), callback_data: "service:game_topup" }]] },
+        messageId,
+        "gameTopup.cancelByCallback"
+      );
+      return true;
+    }
+
+    if (!state || state.name !== "GAME_TOPUP_READY_CONFIRM") {
+      await safeTelegramCall("gameTopup.confirm.missingState", () =>
+        bot.answerCallbackQuery(query.id, {
+          text: tr(lang, "انتهت الجلسة، ابدأ من جديد.", "Session expired, start again."),
+          show_alert: true,
+        })
+      );
+      return true;
+    }
+
+    const msg = { ...query.message, from: query.from, text: "" };
+    return processTopupOrder(bot, msg, appStore, state);
+  } catch (error) {
+    logBotError("handleGameTopupCallback", error, { userId: query.from?.id, data: query.data });
+    return true;
   }
 }
 
@@ -432,6 +564,7 @@ module.exports = {
   sendGameTopupPackagesMenu,
   startGameTopupIdInput,
   handleGameTopupTextInput,
+  handleGameTopupCallback,
   isGameTopupProviderConfigured: isProviderConfigured,
 };
 

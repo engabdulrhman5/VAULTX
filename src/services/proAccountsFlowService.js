@@ -7,7 +7,7 @@ const { setUserState, getUserState, clearUserState } = require("./stateStore");
 const { escapeHtml } = require("../utils/formatters");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
-const FRAME = "━━━━━━━━━━━━━━━━━━━━";
+const FRAME = "━━━━━━━━━━━━━━━━━━━";
 
 function vaultCard(title, lines, footer) {
   return [

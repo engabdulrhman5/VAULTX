@@ -6,7 +6,7 @@ const { logBotError } = require("./errorLogger");
 const { safeTelegramCall } = require("./telegramSafe");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
-const FRAME = "━━━━━━━━━━━━━━━━━━━━";
+const FRAME = "━━━━━━━━━━━━━━━━━━━";
 
 function vaultCard(title, lines, footer) {
   return [

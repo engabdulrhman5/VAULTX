@@ -53,6 +53,7 @@ const {
   sendGameTopupGamesMenu,
   sendGameTopupPackagesMenu,
   startGameTopupIdInput,
+  handleGameTopupCallback,
 } = require("../services/gameTopupFlowService");
 const { sendGrizzlyCountriesMenu, sendGrizzlyCountryDetails } = require("../services/grizzlyMenuService");
 const { requestNumber, getSmsStatus, cancelNumber } = require("../services/grizzlyService");
@@ -307,6 +308,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
     const digitalHandled = await handleDigitalServicesCallback(bot, query, appStore);
     if (digitalHandled) {
+      return true;
+    }
+
+    const gameTopupHandled = await handleGameTopupCallback(bot, query, appStore);
+    if (gameTopupHandled) {
       return true;
     }
 
