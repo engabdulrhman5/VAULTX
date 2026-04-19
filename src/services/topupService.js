@@ -11,10 +11,12 @@ const { sendOrEditMessage } = require("./profileService");
 const { safeTelegramCall } = require("./telegramSafe");
 const { formatRuble } = require("../utils/formatters");
 const { t } = require("../locales");
+const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
 async function sendTopupHome(bot, chatId, options = {}) {
   const lang = options.lang || "ar";
-  const text = [t(lang, "topup_title"), "", t(lang, "topup_subtitle"), "", t(lang, "topup_instant")].join("\n");
+  const balance = Number(options.user?.balance || 0);
+  const text = buildVaultxServiceCard(lang, "balance_topup", { balance: formatRuble(balance) });
   return sendOrEditMessage(bot, chatId, text, getTopupHomeKeyboard(lang), options.messageId, "sendTopupHome");
 }
 

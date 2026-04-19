@@ -28,10 +28,18 @@ const { smmServices, getPlatform, getCategory, getServiceInfo } = require("../co
 const { getUserLang, getArray, t } = require("../locales");
 const { escapeHtml, formatRuble } = require("../utils/formatters");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
+const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
 async function sendVirtualNumbersMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  return sendOrEditMessage(bot, chatId, t(lang, "virtualNumbers_inst"), getVirtualNumbersKeyboard(lang), options.messageId, "sendVirtualNumbersMenu");
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildVaultxServiceCard(lang, "virtual_numbers"),
+    getVirtualNumbersKeyboard(lang),
+    options.messageId,
+    "sendVirtualNumbersMenu"
+  );
 }
 
 async function sendVirtualNumbersServerSelectionMenu(bot, chatId, user, appName, options = {}) {
@@ -272,7 +280,7 @@ async function sendSocialBoostMenu(bot, chatId, user, options = {}) {
   return sendOrEditMessage(
     bot,
     chatId,
-    buildSocialBoostPlatformsText(lang),
+    buildVaultxServiceCard(lang, "social_boost"),
     getSocialBoostPlatformsKeyboard(smmServices, lang),
     options.messageId,
     "sendSocialBoostMenu"
@@ -652,8 +660,14 @@ async function sendProSubcategoryMenu(bot, chatId, user, subcategoryKey, options
 
 async function sendSocialAccountsMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const title = lang === "ar" ? "👥 حسابات السوشال" : "👥 Social Accounts";
-  return sendOrEditMessage(bot, chatId, title, getSocialAccountsCategoriesKeyboard(getArray(lang, "socialAccounts_categories"), lang), options.messageId, "sendSocialAccountsMenu");
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildVaultxServiceCard(lang, "social_accounts"),
+    getSocialAccountsCategoriesKeyboard(getArray(lang, "socialAccounts_categories"), lang),
+    options.messageId,
+    "sendSocialAccountsMenu"
+  );
 }
 
 async function sendSocialAccountsPlatformsMenu(bot, chatId, user, categoryKey, options = {}) {
@@ -676,14 +690,26 @@ async function sendServiceSelectionPlaceholder(bot, chatId, user, title, options
 
 async function sendCloudServicesMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const title = lang === "ar" ? "☁️ الخدمات السحابية" : "☁️ Cloud Services";
-  return sendOrEditMessage(bot, chatId, title, getCloudServicesKeyboard(getArray(lang, "cloudServices_items"), lang), options.messageId, "sendCloudServicesMenu");
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildVaultxServiceCard(lang, "cloud_services"),
+    getCloudServicesKeyboard(getArray(lang, "cloudServices_items"), lang),
+    options.messageId,
+    "sendCloudServicesMenu"
+  );
 }
 
 async function sendTemporaryEmailsMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const title = lang === "ar" ? "📧 الإيميلات المؤقتة" : "📧 Temporary Emails";
-  return sendOrEditMessage(bot, chatId, title, getTemporaryEmailsKeyboard(getArray(lang, "temporaryEmails_items"), lang), options.messageId, "sendTemporaryEmailsMenu");
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildVaultxServiceCard(lang, "temporary_emails"),
+    getTemporaryEmailsKeyboard(getArray(lang, "temporaryEmails_items"), lang),
+    options.messageId,
+    "sendTemporaryEmailsMenu"
+  );
 }
 
 function buildMockTempEmailSession() {
@@ -721,8 +747,14 @@ function getMockTempEmailMessages(session) {
 
 async function sendVirtualVisaMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const title = lang === "ar" ? "💳 الفيزا الافتراضية" : "💳 Virtual Visa";
-  return sendOrEditMessage(bot, chatId, title, getVirtualVisaKeyboard(getArray(lang, "virtualVisa_items"), lang), options.messageId, "sendVirtualVisaMenu");
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    buildVaultxServiceCard(lang, "virtual_visa"),
+    getVirtualVisaKeyboard(getArray(lang, "virtualVisa_items"), lang),
+    options.messageId,
+    "sendVirtualVisaMenu"
+  );
 }
 
 async function sendGameTopupMenu(bot, chatId, user, pageIndex, options = {}) {

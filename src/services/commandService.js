@@ -21,7 +21,7 @@ async function handleAccountCommand(bot, msg, appStore) {
 
 async function handleAddFundsCommand(bot, msg, appStore) {
   const user = appStore.getOrCreateUser(msg.from);
-  await sendTopupHome(bot, msg.chat.id, { lang: getUserLang(user) });
+  await sendTopupHome(bot, msg.chat.id, { lang: getUserLang(user), user });
 }
 
 async function handleSettingsCommand(bot, msg, appStore) {

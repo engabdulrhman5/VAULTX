@@ -579,7 +579,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
         if (query.data === "service:balance_topup") {
           clearUserState(user.userId);
-          await sendTopupHome(bot, chatId, { messageId, lang: getUserLang(user) });
+          await sendTopupHome(bot, chatId, { messageId, lang: getUserLang(user), user });
           return true;
         }
 
@@ -840,7 +840,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
         if (query.data.startsWith("topup:country:")) {
           const country = query.data.split(":")[2];
-          await sendCountryTopupMenu(bot, chatId, country, { messageId, lang: getUserLang(user) });
+          await sendCountryTopupMenu(bot, chatId, country, { messageId, lang: getUserLang(user), user });
           return true;
         }
 

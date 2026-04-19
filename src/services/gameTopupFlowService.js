@@ -1,9 +1,10 @@
-const { sendOrEditMessage } = require("./profileService");
+﻿const { sendOrEditMessage } = require("./profileService");
 const { getUserLang } = require("../locales");
 const { formatRuble, escapeHtml } = require("../utils/formatters");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { logBotError } = require("./errorLogger");
 const { safeTelegramCall } = require("./telegramSafe");
+const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 const {
   getGameTopupCatalog,
   getCategoryByKey,
@@ -35,48 +36,29 @@ function toRub(usdValue) {
 }
 
 function priceRubLabel(amount) {
-  return `${Number(amount || 0).toFixed(2)} ₽`;
+  return `${Number(amount || 0).toFixed(2)} â‚½`;
 }
 
 function buildCategoriesText(lang, user) {
-  const username = escapeHtml(user.firstName || user.username || String(user.userId || ""));
-  if (lang === "ar") {
-    return [
-      "✅ <b>قسم شحن الألعاب</b>",
-      "",
-      `👋 مرحبًا <b>${username}</b> بك في قسم شحن الألعاب`,
-      "•────────────•",
-      "📌 يرجى اختيار القسم من الأسفل",
-      "⚡ خدماتنا سريعة ومنظمة",
-    ].join("\n");
-  }
-
-  return [
-    "✅ <b>Game Top-up Section</b>",
-    "",
-    `👋 Welcome <b>${username}</b> to Game Top-up`,
-    "•────────────•",
-    "📌 Please choose a category below",
-    "⚡ Fast and organized services",
-  ].join("\n");
+  return buildVaultxServiceCard(lang, "game_topup");
 }
 
 function buildGamesText(lang, category, balance) {
   return [
-    tr(lang, "✅ <b>اختر اللعبة</b>", "✅ <b>Select a game</b>"),
+    tr(lang, "âœ… <b>ط§ط®طھط± ط§ظ„ظ„ط¹ط¨ط©</b>", "âœ… <b>Select a game</b>"),
     "",
-    `${tr(lang, "📂 القسم", "📂 Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
-    `${tr(lang, "💰 رصيدك", "💰 Your balance")} : <b>${formatRuble(balance)}</b>`,
+    `${tr(lang, "ًں“‚ ط§ظ„ظ‚ط³ظ…", "ًں“‚ Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
+    `${tr(lang, "ًں’° ط±طµظٹط¯ظƒ", "ًں’° Your balance")} : <b>${formatRuble(balance)}</b>`,
   ].join("\n");
 }
 
 function buildPackagesText(lang, category, game, balance) {
   return [
-    tr(lang, "✅ <b>اختر الباقة</b>", "✅ <b>Select a package</b>"),
+    tr(lang, "âœ… <b>ط§ط®طھط± ط§ظ„ط¨ط§ظ‚ط©</b>", "âœ… <b>Select a package</b>"),
     "",
-    `${tr(lang, "📂 القسم", "📂 Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
-    `${tr(lang, "🎮 اللعبة", "🎮 Game")} : <b>${game.emoji} ${escapeHtml(gameName(lang, game))}</b>`,
-    `${tr(lang, "💰 رصيدك", "💰 Your balance")} : <b>${formatRuble(balance)}</b>`,
+    `${tr(lang, "ًں“‚ ط§ظ„ظ‚ط³ظ…", "ًں“‚ Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
+    `${tr(lang, "ًںژ® ط§ظ„ظ„ط¹ط¨ط©", "ًںژ® Game")} : <b>${game.emoji} ${escapeHtml(gameName(lang, game))}</b>`,
+    `${tr(lang, "ًں’° ط±طµظٹط¯ظƒ", "ًں’° Your balance")} : <b>${formatRuble(balance)}</b>`,
   ].join("\n");
 }
 
@@ -84,19 +66,19 @@ function buildFixedInfoRows(lang, packageItemRub) {
   return [
     {
       left: lang === "ar" ? packageItemRub.units_ar : packageItemRub.units_en,
-      right: tr(lang, "🌐 الفئة", "🌐 Package"),
+      right: tr(lang, "ًںŒگ ط§ظ„ظپط¦ط©", "ًںŒگ Package"),
     },
     {
       left: priceRubLabel(packageItemRub.priceRub),
-      right: tr(lang, "💰 السعر", "💰 Price"),
+      right: tr(lang, "ًں’° ط§ظ„ط³ط¹ط±", "ًں’° Price"),
     },
     {
-      left: tr(lang, "تلقائي", "Automatic"),
-      right: tr(lang, "🌟 نوع الشحن", "🌟 Top-up Type"),
+      left: tr(lang, "طھظ„ظ‚ط§ط¦ظٹ", "Automatic"),
+      right: tr(lang, "ًںŒں ظ†ظˆط¹ ط§ظ„ط´ط­ظ†", "ًںŒں Top-up Type"),
     },
     {
-      left: tr(lang, "خلال 4 ساعات", "Within 4 hours"),
-      right: tr(lang, "⏰ وقت الشحن", "⏰ Delivery Time"),
+      left: tr(lang, "ط®ظ„ط§ظ„ 4 ط³ط§ط¹ط§طھ", "Within 4 hours"),
+      right: tr(lang, "âڈ° ظˆظ‚طھ ط§ظ„ط´ط­ظ†", "âڈ° Delivery Time"),
     },
   ];
 }
@@ -104,61 +86,61 @@ function buildFixedInfoRows(lang, packageItemRub) {
 function buildInfoText(lang, game, packageItemRub) {
   const amountLabel = packageItemRub
     ? (lang === "ar" ? packageItemRub.units_ar : packageItemRub.units_en)
-    : tr(lang, "شحن مخصص", "Custom top-up");
+    : tr(lang, "ط´ط­ظ† ظ…ط®طµطµ", "Custom top-up");
   const priceLabel = packageItemRub ? priceRubLabel(packageItemRub.priceRub) : "-";
 
   if (lang === "ar") {
     return [
-      `✅ معلومات الخدمة: شحن <b>${escapeHtml(gameName(lang, game))}</b>`,
+      `âœ… ظ…ط¹ظ„ظˆظ…ط§طھ ط§ظ„ط®ط¯ظ…ط©: ط´ط­ظ† <b>${escapeHtml(gameName(lang, game))}</b>`,
       "",
-      `💵 السعر: <b>${priceLabel}</b>`,
-      `🪪 المطلوب: <b>${escapeHtml(game.idLabelAr || "ID")}</b>`,
+      `ًں’µ ط§ظ„ط³ط¹ط±: <b>${priceLabel}</b>`,
+      `ًںھھ ط§ظ„ظ…ط·ظ„ظˆط¨: <b>${escapeHtml(game.idLabelAr || "ID")}</b>`,
       "",
-      `📩 أرسل الآن ${escapeHtml(game.idLabelAr || "ID")} الخاص بك`,
+      `ًں“© ط£ط±ط³ظ„ ط§ظ„ط¢ظ† ${escapeHtml(game.idLabelAr || "ID")} ط§ظ„ط®ط§طµ ط¨ظƒ`,
       "",
-      `• ${amountLabel} •`,
+      `â€¢ ${amountLabel} â€¢`,
     ].join("\n");
   }
 
   return [
-    `✅ Service info: Top-up <b>${escapeHtml(gameName(lang, game))}</b>`,
+    `âœ… Service info: Top-up <b>${escapeHtml(gameName(lang, game))}</b>`,
     "",
-    `💵 Price: <b>${priceLabel}</b>`,
-    `🪪 Required: <b>${escapeHtml(game.idLabelEn || "ID")}</b>`,
+    `ًں’µ Price: <b>${priceLabel}</b>`,
+    `ًںھھ Required: <b>${escapeHtml(game.idLabelEn || "ID")}</b>`,
     "",
-    `📩 Send your ${escapeHtml(game.idLabelEn || "ID")} now`,
+    `ًں“© Send your ${escapeHtml(game.idLabelEn || "ID")} now`,
     "",
-    `• ${amountLabel} •`,
+    `â€¢ ${amountLabel} â€¢`,
   ].join("\n");
 }
 
 function buildCustomAmountPrompt(lang, game) {
   const unitLabel = lang === "ar" ? game.custom.unitLabelAr : game.custom.unitLabelEn;
   return [
-    tr(lang, "🛠️ اخترت الشحن المخصص", "🛠️ You selected custom top-up"),
+    tr(lang, "ًں› ï¸ڈ ط§ط®طھط±طھ ط§ظ„ط´ط­ظ† ط§ظ„ظ…ط®طµطµ", "ًں› ï¸ڈ You selected custom top-up"),
     "",
-    `${tr(lang, "📦 الوحدة", "📦 Unit")} : <b>${escapeHtml(unitLabel)}</b>`,
-    `${tr(lang, "💰 السعر للوحدة", "💰 Unit price")} : <b>${priceRubLabel(toRub(game.custom.unitPriceRub))}</b>`,
-    `${tr(lang, "📉 الحد الأدنى", "📉 Minimum")} : <b>${game.custom.min}</b>`,
-    `${tr(lang, "📈 الحد الأقصى", "📈 Maximum")} : <b>${game.custom.max}</b>`,
+    `${tr(lang, "ًں“¦ ط§ظ„ظˆط­ط¯ط©", "ًں“¦ Unit")} : <b>${escapeHtml(unitLabel)}</b>`,
+    `${tr(lang, "ًں’° ط§ظ„ط³ط¹ط± ظ„ظ„ظˆط­ط¯ط©", "ًں’° Unit price")} : <b>${priceRubLabel(toRub(game.custom.unitPriceRub))}</b>`,
+    `${tr(lang, "ًں“‰ ط§ظ„ط­ط¯ ط§ظ„ط£ط¯ظ†ظ‰", "ًں“‰ Minimum")} : <b>${game.custom.min}</b>`,
+    `${tr(lang, "ًں“ˆ ط§ظ„ط­ط¯ ط§ظ„ط£ظ‚طµظ‰", "ًں“ˆ Maximum")} : <b>${game.custom.max}</b>`,
     "",
-    tr(lang, "✍️ أرسل الكمية المطلوبة (أرقام فقط)", "✍️ Send required quantity (numbers only)"),
+    tr(lang, "âœچï¸ڈ ط£ط±ط³ظ„ ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط·ظ„ظˆط¨ط© (ط£ط±ظ‚ط§ظ… ظپظ‚ط·)", "âœچï¸ڈ Send required quantity (numbers only)"),
   ].join("\n");
 }
 
 function buildInvoiceText(lang, details) {
-  const done = tr(lang, "✅ تم التنفيذ", "✅ Completed");
+  const done = tr(lang, "âœ… طھظ… ط§ظ„طھظ†ظپظٹط°", "âœ… Completed");
   return [
-    tr(lang, "🧾 فاتورة تنفيذ العملية", "🧾 Order Invoice"),
+    tr(lang, "ًں§¾ ظپط§طھظˆط±ط© طھظ†ظپظٹط° ط§ظ„ط¹ظ…ظ„ظٹط©", "ًں§¾ Order Invoice"),
     "",
-    `➖ ${tr(lang, "رقم الطلب", "Order ID")} : <code>${details.orderId}</code>`,
-    `➖ ${tr(lang, "اللعبة", "Game")} : ${details.gameName}`,
-    `➖ ${tr(lang, "الآيدي", "ID")} : <code>${escapeHtml(details.playerId)}</code>`,
-    `➖ ${tr(lang, "الباقة", "Package")} : ${escapeHtml(details.packageLabel)}`,
-    `➖ ${tr(lang, "السعر", "Price")} : <b>${priceRubLabel(details.totalPrice)}</b>`,
+    `â‍– ${tr(lang, "ط±ظ‚ظ… ط§ظ„ط·ظ„ط¨", "Order ID")} : <code>${details.orderId}</code>`,
+    `â‍– ${tr(lang, "ط§ظ„ظ„ط¹ط¨ط©", "Game")} : ${details.gameName}`,
+    `â‍– ${tr(lang, "ط§ظ„ط¢ظٹط¯ظٹ", "ID")} : <code>${escapeHtml(details.playerId)}</code>`,
+    `â‍– ${tr(lang, "ط§ظ„ط¨ط§ظ‚ط©", "Package")} : ${escapeHtml(details.packageLabel)}`,
+    `â‍– ${tr(lang, "ط§ظ„ط³ط¹ط±", "Price")} : <b>${priceRubLabel(details.totalPrice)}</b>`,
     "",
-    `➖ ${tr(lang, "حالة التنفيذ", "Execution")} : <b>${done}</b>`,
-    `➖ ${tr(lang, "حالة المزود", "Provider")} : <b>${details.providerStatus}</b>`,
+    `â‍– ${tr(lang, "ط­ط§ظ„ط© ط§ظ„طھظ†ظپظٹط°", "Execution")} : <b>${done}</b>`,
+    `â‍– ${tr(lang, "ط­ط§ظ„ط© ط§ظ„ظ…ط²ظˆط¯", "Provider")} : <b>${details.providerStatus}</b>`,
   ].join("\n");
 }
 
@@ -245,7 +227,7 @@ async function startGameTopupIdInput(bot, chatId, user, selection, options = {})
   const rowsData = packageItemRub
     ? buildFixedInfoRows(lang, packageItemRub)
     : buildFixedInfoRows(lang, {
-      units_ar: "مخصص",
+      units_ar: "ظ…ط®طµطµ",
       units_en: "Custom",
       priceRub: toRub(game.custom.unitPriceRub),
     });
@@ -275,14 +257,14 @@ async function processTopupOrder(bot, msg, appStore, payload) {
   if (!Number.isFinite(totalPrice) || totalPrice <= 0) {
     clearUserState(msg.from.id);
     await safeTelegramCall("gameTopup.invalidPrice", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "❌ سعر الطلب غير صالح.", "❌ Invalid order price."))
+      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ ط³ط¹ط± ط§ظ„ط·ظ„ط¨ ط؛ظٹط± طµط§ظ„ط­.", "â‌Œ Invalid order price."))
     );
     return true;
   }
 
   if (user.balance < totalPrice) {
     await safeTelegramCall("gameTopup.insufficientBalance", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "❌ رصيدك غير كافٍ لإتمام الطلب.", "❌ Insufficient balance."))
+      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ ط±طµظٹط¯ظƒ ط؛ظٹط± ظƒط§ظپظچ ظ„ط¥طھظ…ط§ظ… ط§ظ„ط·ظ„ط¨.", "â‌Œ Insufficient balance."))
     );
     return true;
   }
@@ -296,7 +278,7 @@ async function processTopupOrder(bot, msg, appStore, payload) {
 
   if (!orderResult.success) {
     await safeTelegramCall("gameTopup.orderFailed", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "❌ تعذر تنفيذ الطلب من المزود حالياً.", "❌ Provider could not process order now."))
+      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ طھط¹ط°ط± طھظ†ظپظٹط° ط§ظ„ط·ظ„ط¨ ظ…ظ† ط§ظ„ظ…ط²ظˆط¯ ط­ط§ظ„ظٹط§ظ‹.", "â‌Œ Provider could not process order now."))
     );
     return true;
   }
@@ -323,8 +305,8 @@ async function processTopupOrder(bot, msg, appStore, payload) {
   clearUserState(user.userId);
 
   const providerStatus = orderResult.provider === "remote"
-    ? tr(lang, "تم الإرسال إلى المزود", "Submitted to provider")
-    : tr(lang, "تم الحجز محلياً (بدون مزود)", "Saved locally (provider disabled)");
+    ? tr(lang, "طھظ… ط§ظ„ط¥ط±ط³ط§ظ„ ط¥ظ„ظ‰ ط§ظ„ظ…ط²ظˆط¯", "Submitted to provider")
+    : tr(lang, "طھظ… ط§ظ„ط­ط¬ط² ظ…ط­ظ„ظٹط§ظ‹ (ط¨ط¯ظˆظ† ظ…ط²ظˆط¯)", "Saved locally (provider disabled)");
 
   await safeTelegramCall("gameTopup.orderSuccess", () =>
     bot.sendMessage(
@@ -341,7 +323,7 @@ async function processTopupOrder(bot, msg, appStore, payload) {
         parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [
-            [{ text: tr(lang, "رجوع", "Back"), callback_data: "service:game_topup" }],
+            [{ text: tr(lang, "ط±ط¬ظˆط¹", "Back"), callback_data: "service:game_topup" }],
           ],
         },
       }
@@ -363,10 +345,10 @@ async function handleGameTopupTextInput(bot, msg, appStore) {
     const text = String(msg.text || "").trim();
     if (!text) return true;
 
-    if (["cancel", "إلغاء", "الغاء"].includes(text.toLowerCase())) {
+    if (["cancel", "ط¥ظ„ط؛ط§ط،", "ط§ظ„ط؛ط§ط،"].includes(text.toLowerCase())) {
       clearUserState(user.userId);
       await safeTelegramCall("gameTopup.cancel", () =>
-        bot.sendMessage(msg.chat.id, tr(lang, "تم إلغاء العملية.", "Operation cancelled."))
+        bot.sendMessage(msg.chat.id, tr(lang, "طھظ… ط¥ظ„ط؛ط§ط، ط§ظ„ط¹ظ…ظ„ظٹط©.", "Operation cancelled."))
       );
       return true;
     }
@@ -409,7 +391,7 @@ async function handleGameTopupTextInput(bot, msg, appStore) {
 
     if (!/^\d+$/.test(text)) {
       await safeTelegramCall("gameTopup.invalidAmountFormat", () =>
-        bot.sendMessage(msg.chat.id, tr(lang, "❌ الرجاء إرسال الكمية أرقام فقط.", "❌ Please send quantity as numbers only."))
+        bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ ط§ظ„ط±ط¬ط§ط، ط¥ط±ط³ط§ظ„ ط§ظ„ظƒظ…ظٹط© ط£ط±ظ‚ط§ظ… ظپظ‚ط·.", "â‌Œ Please send quantity as numbers only."))
       );
       return true;
     }
@@ -421,8 +403,8 @@ async function handleGameTopupTextInput(bot, msg, appStore) {
           msg.chat.id,
           tr(
             lang,
-            `❌ الكمية خارج النطاق المسموح (${game.custom.min} - ${game.custom.max}).`,
-            `❌ Quantity out of allowed range (${game.custom.min} - ${game.custom.max}).`
+            `â‌Œ ط§ظ„ظƒظ…ظٹط© ط®ط§ط±ط¬ ط§ظ„ظ†ط·ط§ظ‚ ط§ظ„ظ…ط³ظ…ظˆط­ (${game.custom.min} - ${game.custom.max}).`,
+            `â‌Œ Quantity out of allowed range (${game.custom.min} - ${game.custom.max}).`
           )
         )
       );
@@ -452,4 +434,6 @@ module.exports = {
   handleGameTopupTextInput,
   isGameTopupProviderConfigured: isProviderConfigured,
 };
+
+
 

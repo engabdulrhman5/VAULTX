@@ -5,6 +5,7 @@ const { logBotError } = require("./errorLogger");
 const { getUserLang } = require("../locales");
 const { setUserState, getUserState, clearUserState } = require("./stateStore");
 const { escapeHtml } = require("../utils/formatters");
+const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
 const PRO_TEXTS = {
   ar: {
@@ -455,12 +456,11 @@ function setFlowState(userId, data) {
 
 async function sendProAccountsHome(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
-  const texts = getTexts(lang);
   clearUserState(user.userId);
   return sendOrEditMessage(
     bot,
     chatId,
-    texts.mainMenu,
+    buildVaultxServiceCard(lang, "pro_accounts"),
     buildCategoryKeyboard(lang),
     options.messageId,
     "sendProAccountsHome"

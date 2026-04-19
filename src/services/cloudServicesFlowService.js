@@ -4,6 +4,7 @@ const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { escapeHtml } = require("../utils/formatters");
 const { logBotError } = require("./errorLogger");
 const { safeTelegramCall } = require("./telegramSafe");
+const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
 const TEXTS = {
   ar: {
@@ -189,7 +190,7 @@ async function sendCloudServicesHome(bot, chatId, user, options = {}) {
   return sendOrEditMessage(
     bot,
     chatId,
-    t.home,
+    buildVaultxServiceCard(lang, "cloud_services"),
     keyboard([
       [{ text: t.vps, callback_data: "cloud:vps:os" }],
       [{ text: t.domains, callback_data: "cloud:domain:start" }],
