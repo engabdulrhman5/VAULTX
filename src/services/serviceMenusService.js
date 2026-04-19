@@ -30,6 +30,17 @@ const { escapeHtml, formatRuble } = require("../utils/formatters");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
 
+function buildCard(frame, title, lines, footer) {
+  return [
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    frame,
+    title,
+    ...lines,
+    frame,
+    footer,
+  ].join("\n");
+}
+
 async function sendVirtualNumbersMenu(bot, chatId, user, options = {}) {
   const lang = getUserLang(user);
   return sendOrEditMessage(
@@ -233,46 +244,78 @@ function buildSocialBoostPlatformsText(lang) {
 }
 
 function buildSocialBoostCategoriesText(lang, platform) {
-  const platformLabel = getSocialBoostLabel(lang, platform);
   if (lang === "ar") {
-    return [
-      `✅ اهلا بك في قسم الرشق الخاص بـ ${platformLabel}`,
-      "",
-      "” اختر الخدمة التي تريدها عبر الأزرار بالأسفل ⬇️ ”",
-    ].join("\n");
+    return buildCard(
+      "━━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ نـوع الـخـدمـــة الـمـطـلـوبـــة ❩ ♦️",
+      [
+        "💡 تختلف الخدمات المتاحة حسب المنصة المختارة.",
+        "💡 نوفر زيادة للمتابعين، المشاهدات، والتفاعلات.",
+        "💡 اختر نوع التفاعل الذي ترغب بإضافته لحسابك.",
+      ],
+      "⬇️ يرجى تحديد نوع الخدمة من القائمة أدناه ⬇️"
+    );
   }
-  return [
-    `✅ Welcome to ${platformLabel} boost section`,
-    "",
-    "” Choose the service you need from buttons below ⬇️ ”",
-  ].join("\n");
+  return buildCard(
+    "━━━━━━━━━━━━━━━━━━━━",
+    "♦️ ❨ REQUIRED SERVICE TYPE ❩ ♦️",
+    [
+      "💡 Available services vary by selected platform.",
+      "💡 We provide followers, views, and engagement boosts.",
+      "💡 Choose the interaction type you need for your account.",
+    ],
+    "⬇️ Please select the service type below ⬇️"
+  );
 }
 
 function buildSocialBoostServicesText(lang, platform, category) {
   if (lang === "ar") {
-    return [
-      `• ${getSocialBoostLabel(lang, category)} ${getSocialBoostLabel(lang, platform)} ✅`,
-      "",
-      "🔥 يرجى اختيار نوع الرشق من الأسفل ⬇️",
-    ].join("\n");
+    return buildCard(
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ جـــودة الـخـدمـــة والأسـعـــار ❩ ♦️",
+      [
+        "💡 باقات بضمان تعويض النقص وأخرى بدون ضمان.",
+        "💡 الجودة العالية تضمن استقرار وسرعة التنفيذ.",
+        "💡 السعر الموضح في الأزرار هو لكل 1 تفاعل.",
+      ],
+      "⬇️ يرجى اختيار جودة الخدمة المناسبة لميزانيتك ⬇️"
+    );
   }
-  return [
-    `• ${getSocialBoostLabel(lang, platform)} ${getSocialBoostLabel(lang, category)} ✅`,
-    "",
-    "🔥 Please choose boost type from below ⬇️",
-  ].join("\n");
+  return buildCard(
+    "━━━━━━━━━━━━━━━━━━━",
+    "♦️ ❨ SERVICE QUALITY & PRICING ❩ ♦️",
+    [
+      "💡 Some packages include refill warranty and some do not.",
+      "💡 Higher quality improves stability and delivery speed.",
+      "💡 Price shown in buttons is for each 1 interaction.",
+    ],
+    "⬇️ Please select the quality tier for your budget ⬇️"
+  );
 }
 
-function buildSocialBoostDetailText(lang, serviceName, accountHint) {
-  return [
-    lang === "ar"
-      ? `🎬 نوع الرشق : ${escapeHtml(serviceName)}`
-      : `🎬 Boost type : ${escapeHtml(serviceName)}`,
-    "",
-    lang === "ar" ? "🔴 أدخل رابط حسابك وتأكد أنه عام" : "🔴 Send public account link",
-    "",
-    lang === "ar" ? `🔗 يرجى إرسال رابط حسابك ${accountHint}` : `🔗 Please send your link ${accountHint}`,
-  ].join("\n");
+function buildSocialBoostDetailText(lang, payload) {
+  if (lang === "ar") {
+    return buildCard(
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ تـفـاصـيـــل الـطـلـــب والـرابـــط ❩ ♦️",
+      [
+        `📌 الخدمة: ${escapeHtml(payload.serviceName)} | 💎 الجودة: ${escapeHtml(payload.quality)}`,
+        `💰 السعر: ${escapeHtml(payload.pricePerOne)} لكل 1 | 🛑 الحد الأدنى: ${escapeHtml(String(payload.min))}`,
+        "💡 تأكد أن الحساب (عام) وليس (خاص/Private).",
+      ],
+      "⬇️ يرجى أرسال رابط حسابك ⬇️"
+    );
+  }
+  return buildCard(
+    "━━━━━━━━━━━━━━━━━━━",
+    "♦️ ❨ ORDER DETAILS & LINK ❩ ♦️",
+    [
+      `📌 Service: ${escapeHtml(payload.serviceName)} | 💎 Quality: ${escapeHtml(payload.quality)}`,
+      `💰 Price: ${escapeHtml(payload.pricePerOne)} per 1 | 🛑 Min: ${escapeHtml(String(payload.min))}`,
+      "💡 Make sure the account is Public (not Private).",
+    ],
+    "⬇️ Please send your account link ⬇️"
+  );
 }
 
 async function sendSocialBoostMenu(bot, chatId, user, options = {}) {
@@ -363,7 +406,12 @@ async function sendSocialBoostServiceDetails(bot, chatId, user, platformKey, cat
   const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
   const pricePer1000 = cached.pricePer1000RubFormatted
     || (Number.isFinite(cached.pricePer1000Rub) ? Number(cached.pricePer1000Rub).toFixed(4) : getSocialBoostFallback(lang, "socialBoost_unknown"));
-  const accountHint = lang === "ar" ? "🔗" : "🔗";
+  const unitPriceValue = Number(cached?.pricePerUnitRub || 0);
+  const pricePerOne = Number.isFinite(unitPriceValue) && unitPriceValue > 0
+    ? `${unitPriceValue.toFixed(4)} ₽`
+    : "0.0000 ₽";
+  const qualityLabel = getSocialBoostQuality(lang, cached);
+  const minValue = Number(cached?.min || 0) || 0;
   const detailRows = [
     { label: lang === "ar" ? "💰 - السعر / 1k :" : "💰 - Price / 1k :", value: `${pricePer1000}` },
     { label: lang === "ar" ? "🚀 - السرعة :" : "🚀 - Speed :", value: getSocialBoostMetricValue(lang, cached.speed) },
@@ -380,7 +428,12 @@ async function sendSocialBoostServiceDetails(bot, chatId, user, platformKey, cat
   return sendOrEditMessage(
     bot,
     chatId,
-    buildSocialBoostDetailText(lang, serviceName, accountHint),
+    buildSocialBoostDetailText(lang, {
+      serviceName,
+      quality: qualityLabel,
+      pricePerOne,
+      min: minValue,
+    }),
     getSocialBoostServiceDetailsKeyboard(detailRows, `service_menu:social_boost:category:${platformKey}:${categoryKey}`, lang),
     options.messageId,
     "sendSocialBoostServiceDetails"

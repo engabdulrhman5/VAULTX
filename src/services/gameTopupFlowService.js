@@ -52,16 +52,49 @@ function priceRubLabel(amount) {
 }
 
 function buildCategoriesText(lang, user) {
-  return buildVaultxServiceCard(lang, "game_topup");
+  if (lang === "ar") {
+    return topupCard(
+      "♦️ ❨ أنــــواع الـشـحـــن ❩ ♦️",
+      [
+        "💡 اختر نوع الخدمة أو فئة الألعاب التي تريدها.",
+        "💡 لكل نوع قائمة ألعاب وخيارات شحن مختلفة.",
+        "💡 جميع الخدمات داخل هذا القسم تنفيذها فوري.",
+      ],
+      "⬇️ يرجى اختيار نوع الشحن من القائمة ⬇️"
+    );
+  }
+  return topupCard(
+    "♦️ ❨ TOP-UP TYPES ❩ ♦️",
+    [
+      "💡 Choose the service type or game category.",
+      "💡 Each type has different games and packages.",
+      "💡 All services in this section are instant execution.",
+    ],
+    "⬇️ Please choose a top-up type from the list ⬇️"
+  );
 }
 
 function buildGamesText(lang, category, balance) {
-  return [
-    tr(lang, "âœ… <b>ط§ط®طھط± ط§ظ„ظ„ط¹ط¨ط©</b>", "âœ… <b>Select a game</b>"),
-    "",
-    `${tr(lang, "ًں“‚ ط§ظ„ظ‚ط³ظ…", "ًں“‚ Category")} : <b>${escapeHtml(lang === "en" ? category.name_en : category.name_ar)}</b>`,
-    `${tr(lang, "ًں’° ط±طµظٹط¯ظƒ", "ًں’° Your balance")} : <b>${formatRuble(balance)}</b>`,
-  ].join("\n");
+  if (lang === "ar") {
+    return topupCard(
+      "♦️ ❨ اخـتـيـــار الـلـعـبـــة ❩ ♦️",
+      [
+        `🧩 النوع: <b>${escapeHtml(category.name_ar)}</b>`,
+        "💡 تم عرض الألعاب المتاحة ضمن هذا النوع.",
+        "💡 اختر اللعبة المطلوبة للانتقال إلى الباقات.",
+      ],
+      "⬇️ يرجى اختيار اللعبة من القائمة ⬇️"
+    );
+  }
+  return topupCard(
+    "♦️ ❨ SELECT GAME ❩ ♦️",
+    [
+      `🧩 Type: <b>${escapeHtml(category.name_en)}</b>`,
+      "💡 Available games for this type are listed below.",
+      "💡 Choose your game to continue to packages.",
+    ],
+    "⬇️ Please select a game from the list ⬇️"
+  );
 }
 
 function buildPackagesText(lang, category, game, balance) {
@@ -90,35 +123,37 @@ function buildPackagesText(lang, category, game, balance) {
   );
 }
 
-function buildFixedInfoRows(lang, packageItemRub) {
+function buildRequestInfoRows(lang, payload) {
+  const categoryLabel = payload.categoryLabel;
+  const gameLabel = payload.gameLabel;
+  if (payload.isCustom) {
+    return [
+      { left: categoryLabel, right: lang === "ar" ? "🧩 النوع" : "🧩 Type" },
+      { left: gameLabel, right: lang === "ar" ? "🎮 اللعبة" : "🎮 Game" },
+      { left: payload.unitLabel, right: lang === "ar" ? "🧪 الوحدة" : "🧪 Unit" },
+      { left: payload.unitPrice, right: lang === "ar" ? "💰 سعر الوحدة" : "💰 Unit Price" },
+    ];
+  }
+
   return [
-    {
-      left: lang === "ar" ? packageItemRub.units_ar : packageItemRub.units_en,
-      right: tr(lang, "ًںŒگ ط§ظ„ظپط¦ط©", "ًںŒگ Package"),
-    },
-    {
-      left: priceRubLabel(packageItemRub.priceRub),
-      right: tr(lang, "ًں’° ط§ظ„ط³ط¹ط±", "ًں’° Price"),
-    },
-    {
-      left: tr(lang, "طھظ„ظ‚ط§ط¦ظٹ", "Automatic"),
-      right: tr(lang, "ًںŒں ظ†ظˆط¹ ط§ظ„ط´ط­ظ†", "ًںŒں Top-up Type"),
-    },
-    {
-      left: tr(lang, "ط®ظ„ط§ظ„ 4 ط³ط§ط¹ط§طھ", "Within 4 hours"),
-      right: tr(lang, "âڈ° ظˆظ‚طھ ط§ظ„ط´ط­ظ†", "âڈ° Delivery Time"),
-    },
+    { left: categoryLabel, right: lang === "ar" ? "🧩 النوع" : "🧩 Type" },
+    { left: gameLabel, right: lang === "ar" ? "🎮 اللعبة" : "🎮 Game" },
+    { left: payload.packageLabel, right: lang === "ar" ? "📦 الباقة" : "📦 Package" },
+    { left: payload.packagePrice, right: lang === "ar" ? "💰 السعر" : "💰 Price" },
   ];
 }
 
 function buildInfoText(lang, game, packageItemRub) {
+  const isCustom = !packageItemRub;
   if (lang === "ar") {
     return topupCard(
       "♦️ ❨ مـعـــرف الـلاعـــب ( I D ) ❩ ♦️",
       [
-        "💡 يرجى التأكد من نسخ المعرف (ID) بشكل صحيح.",
-        "💡 الشحن يتم عبر الآيدي فقط، ولا نطلب كلمة المرور.",
-        "💡 خطأ في إدخال الآيدي قد يؤدي لشحن حساب آخر!",
+        isCustom
+          ? "💡 تم تجهيز طلب الشحن المخصص بناءً على اختياراتك."
+          : "💡 تم تجهيز بيانات الطلب بناءً على اختياراتك السابقة.",
+        "💡 الجدول بالأسفل للعرض فقط وليس للاختيار.",
+        "💡 تأكد من صحة الآيدي قبل الإرسال لتجنب الشحن الخاطئ.",
       ],
       "⬇️ يرجى إرسال الآيدي (ID) الخاص بك في رسالة ⬇️"
     );
@@ -127,9 +162,11 @@ function buildInfoText(lang, game, packageItemRub) {
   return topupCard(
     "♦️ ❨ PLAYER I D ❩ ♦️",
     [
-      "💡 Make sure your player ID is copied correctly.",
-      "💡 Top-up is done by ID only, no password is required.",
-      "💡 Wrong ID may charge another account.",
+      isCustom
+        ? "💡 Custom top-up request details are prepared."
+        : "💡 Order details are prepared based on your previous selections.",
+      "💡 The table below is display-only (not selectable).",
+      "💡 Verify your ID carefully to avoid wrong top-up.",
     ],
     "⬇️ Please send your player ID in one message ⬇️"
   );
@@ -304,12 +341,21 @@ async function startGameTopupIdInput(bot, chatId, user, selection, options = {})
     ? { ...rawPackage, priceRub: toRub(rawPackage.priceRub) }
     : null;
 
+  const category = getCategoryByKey(catalog, selection.categoryKey || game.categoryKey);
   const rowsData = packageItemRub
-    ? buildFixedInfoRows(lang, packageItemRub)
-    : buildFixedInfoRows(lang, {
-      units_ar: "ظ…ط®طµطµ",
-      units_en: "Custom",
-      priceRub: toRub(game.custom.unitPriceRub),
+    ? buildRequestInfoRows(lang, {
+      isCustom: false,
+      categoryLabel: lang === "ar" ? (category?.name_ar || "-") : (category?.name_en || "-"),
+      gameLabel: `${game.emoji} ${gameName(lang, game)}`,
+      packageLabel: lang === "ar" ? packageItemRub.units_ar : packageItemRub.units_en,
+      packagePrice: priceRubLabel(packageItemRub.priceRub),
+    })
+    : buildRequestInfoRows(lang, {
+      isCustom: true,
+      categoryLabel: lang === "ar" ? (category?.name_ar || "-") : (category?.name_en || "-"),
+      gameLabel: `${game.emoji} ${gameName(lang, game)}`,
+      unitLabel: lang === "ar" ? game.custom.unitLabelAr : game.custom.unitLabelEn,
+      unitPrice: priceRubLabel(toRub(game.custom.unitPriceRub)),
     });
 
   return sendOrEditMessage(
