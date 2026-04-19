@@ -36,9 +36,10 @@ const PRO_TEXTS = {
     methodNew: "🆕 حساب جديد",
     methodPersonalLabel: "على حسابي الشخصي",
     methodNewLabel: "حساب جديد",
-    confirm: "✅ تأكيد الطلب",
+    confirm: "✅ تأكيد وإتمام الطلب",
     back: "🔙 رجوع",
     backMain: "🏠 الرئيسية",
+    cancelOrder: "❌ إلغاء الطلب",
     cancelled: "تم إلغاء الطلب.",
     invalidInput: "المدخل غير صالح، حاول مجدداً.",
     missingFlow: "انتهت الجلسة، ابدأ من قسم حسابات Pro مرة أخرى.",
@@ -64,9 +65,10 @@ const PRO_TEXTS = {
     methodNew: "🆕 New Account",
     methodPersonalLabel: "Personal Account",
     methodNewLabel: "New Account",
-    confirm: "✅ Confirm Order",
+    confirm: "✅ Confirm & Place Order",
     back: "🔙 Back",
     backMain: "🏠 Main Menu",
+    cancelOrder: "❌ Cancel Order",
     cancelled: "Order canceled.",
     invalidInput: "Invalid input, try again.",
     missingFlow: "Session expired. Start again from Pro Accounts.",
@@ -326,6 +328,121 @@ function getTexts(lang) {
   return PRO_TEXTS[lang] || PRO_TEXTS.ar;
 }
 
+function getPlanCard(lang) {
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ تـحـديـــد نـوع الـخـطـــة ❩ ♦️",
+      [
+        "💡 التطبيق المختار يوفر باقات وخططاً متعددة.",
+        "💡 تختلف الميزات والصلاحيات حسب الخطة المطلوبة.",
+        "💡 يرجى مراجعة الخيارات لتحديد الأنسب لاحتياجك.",
+      ],
+      "⬇️ يرجى اختيار نوع الباقة أو الخطة من القائمة ⬇️"
+    );
+  }
+  return vaultCard(
+    "♦️ ❨ SELECT PLAN TYPE ❩ ♦️",
+    [
+      "💡 The selected app provides multiple plans.",
+      "💡 Features and permissions differ by selected plan.",
+      "💡 Review options to choose what fits your needs.",
+    ],
+    "⬇️ Please choose the package/plan from the list ⬇️"
+  );
+}
+
+function getDurationCard(lang) {
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ مـــدة الاشـتـــراك والـسـعـــر ❩ ♦️",
+      [
+        "💡 تختلف الأسعار باختلاف مدة الاشتراك المطلوبة.",
+        "💡 الاشتراكات الطويلة توفر لك خصومات ممتازة.",
+        "💡 الأسعار شاملة لضمان VaultX طوال فترة الاستخدام.",
+      ],
+      "⬇️ يرجى الضغط على المدة والسعر المناسب لك ⬇️"
+    );
+  }
+  return vaultCard(
+    "♦️ ❨ DURATION & PRICE ❩ ♦️",
+    [
+      "💡 Prices vary depending on subscription duration.",
+      "💡 Longer durations provide better discounts.",
+      "💡 Prices include VaultX warranty during usage.",
+    ],
+    "⬇️ Please press the suitable duration and price ⬇️"
+  );
+}
+
+function getMethodCard(lang) {
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ خـيـــارات تـفـعـيـــل الـحـســـاب ❩ ♦️",
+      [
+        "💡 يمكننا تفعيل الاشتراك على حسابك الشخصي.",
+        "💡 أو تسليمك حساباً جديداً جاهزاً للاستخدام.",
+        "💡 جميع الخيارات آمنة ومضمونة بنسبة 100%.",
+      ],
+      "⬇️ يرجى اختيار طريقة الاستلام والتفعيل المفضلة ⬇️"
+    );
+  }
+  return vaultCard(
+    "♦️ ❨ ACTIVATION OPTIONS ❩ ♦️",
+    [
+      "💡 We can activate subscription on your personal account.",
+      "💡 Or deliver a new ready-to-use account.",
+      "💡 All options are safe and 100% guaranteed.",
+    ],
+    "⬇️ Please choose your preferred activation method ⬇️"
+  );
+}
+
+function getCredentialsCard(lang) {
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ إدخـــال بـيـانـات الـحـسـاب ❩ ♦️",
+      [
+        "💡 لتفعيل الاشتراك، يرجى تزويدنا ببيانات الدخول.",
+        "💡 بياناتك مشفرة وتستخدم لغرض التفعيل فقط.",
+        "💡 يرجى التأكد من صحة الإيميل وكلمة المرور جيداً.",
+      ],
+      "⬇️ يرجى إرسال الإيميل والباسورد في رسالة الآن ⬇️"
+    );
+  }
+  return vaultCard(
+    "♦️ ❨ ACCOUNT DATA INPUT ❩ ♦️",
+    [
+      "💡 To activate, please send your login credentials.",
+      "💡 Your data is encrypted and used for activation only.",
+      "💡 Make sure email and password are correct.",
+    ],
+    "⬇️ Please send email and password in one message ⬇️"
+  );
+}
+
+function getUrlCard(lang) {
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ إرســـال رابـــط الـحـســـاب ❩ ♦️",
+      [
+        "💡 لخدمات التوثيق، لا نطلب كلمة المرور أبداً.",
+        "💡 نحتاج فقط لرابط حسابك للتحقق من الأهلية للتوثيق.",
+        "💡 تأكد أن الحساب عام (Public) وليس خاصاً.",
+      ],
+      "⬇️ يرجى إرسال رابط حسابك (URL) في رسالة الآن ⬇️"
+    );
+  }
+  return vaultCard(
+    "♦️ ❨ SEND ACCOUNT URL ❩ ♦️",
+    [
+      "💡 For verification services, we never ask for password.",
+      "💡 We only need your account URL for eligibility check.",
+      "💡 Ensure account visibility is Public.",
+    ],
+    "⬇️ Please send your account URL now ⬇️"
+  );
+}
+
 function getCategoryAppsCard(lang, category) {
   const key = category?.key;
   if (lang === "ar") {
@@ -489,12 +606,15 @@ function buildDurationsKeyboard(lang, category, app, plan) {
   return { inline_keyboard: rows };
 }
 
-function buildMethodKeyboard(lang) {
+function buildMethodKeyboard(lang, route) {
   const texts = getTexts(lang);
+  const suffix = route
+    ? `:${route.categoryKey}:${route.appKey}:${route.planKey}:${route.durationKey}`
+    : "";
   return {
     inline_keyboard: [
-      [{ text: texts.methodPersonal, callback_data: "pro:meth:personal" }],
-      [{ text: texts.methodNew, callback_data: "pro:meth:new" }],
+      [{ text: texts.methodPersonal, callback_data: `pro:meth:personal${suffix}` }],
+      [{ text: texts.methodNew, callback_data: `pro:meth:new${suffix}` }],
       [{ text: texts.back, callback_data: "pro:back:durations" }],
     ],
   };
@@ -505,7 +625,7 @@ function buildSummaryKeyboard(lang) {
   return {
     inline_keyboard: [
       [{ text: texts.confirm, callback_data: "pro:confirm" }],
-      [{ text: texts.back, callback_data: "pro:back:methods" }],
+      [{ text: texts.cancelOrder, callback_data: "pro:cancel" }],
     ],
   };
 }
@@ -521,14 +641,27 @@ function applyTemplate(text, data) {
 }
 
 function buildSummaryText(lang, draft) {
-  const texts = getTexts(lang);
-  return applyTemplate(texts.finalReceipt, {
-    app: escapeHtml(draft.appName),
-    plan: escapeHtml(draft.planName),
-    duration: escapeHtml(draft.durationLabel),
-    method: escapeHtml(draft.methodLabel),
-    price: `${draft.price}$`,
-  });
+  if (lang === "ar") {
+    return vaultCard(
+      "♦️ ❨ فـاتـــورة تـأكـيـــد الـطـلـــب ❩ ♦️",
+      [
+        `🔹 الخدمة: ${escapeHtml(draft.appName)} - ${escapeHtml(draft.planName)} | ⏳ المدة: ${escapeHtml(draft.durationLabel)}`,
+        `⚙️ التفعيل: ${escapeHtml(draft.methodLabel)} | 💰 الإجمالي المطلوب: ${draft.price}$`,
+        "⚠️ يتم التنفيذ يدوياً للأمان (يستغرق 1 إلى 12 ساعة).",
+      ],
+      "⬇️ يرجى مراجعة طلبك والضغط على تأكيد لإتمامه ⬇️"
+    );
+  }
+
+  return vaultCard(
+    "♦️ ❨ ORDER CONFIRMATION INVOICE ❩ ♦️",
+    [
+      `🔹 Service: ${escapeHtml(draft.appName)} - ${escapeHtml(draft.planName)} | ⏳ Duration: ${escapeHtml(draft.durationLabel)}`,
+      `⚙️ Activation: ${escapeHtml(draft.methodLabel)} | 💰 Total: ${draft.price}$`,
+      "⚠️ Manual secure execution (takes 1 to 12 hours).",
+    ],
+    "⬇️ Please review your request and press confirm ⬇️"
+  );
 }
 
 function getProState(userId) {
@@ -591,7 +724,7 @@ async function sendPlansMenu(bot, chatId, user, categoryKey, appKey, options = {
   return sendOrEditMessage(
     bot,
     chatId,
-    applyTemplate(texts.planSelection, { app: escapeHtml(getLabel(lang, app)) }),
+    getPlanCard(lang),
     buildPlansKeyboard(lang, category, app),
     options.messageId,
     "sendProAccounts.plans"
@@ -615,7 +748,7 @@ async function sendDurationsMenu(bot, chatId, user, categoryKey, appKey, planKey
   return sendOrEditMessage(
     bot,
     chatId,
-    applyTemplate(texts.durationSelection, { plan: escapeHtml(getLabel(lang, plan)) }),
+    getDurationCard(lang),
     buildDurationsKeyboard(lang, category, app, plan),
     options.messageId,
     "sendProAccounts.durations"
@@ -668,7 +801,7 @@ async function sendActivationStep(bot, chatId, user, categoryKey, appKey, planKe
     return sendOrEditMessage(
       bot,
       chatId,
-      texts.urlPrompt,
+      getUrlCard(lang),
       { inline_keyboard: [[{ text: texts.back, callback_data: "pro:back:durations" }]] },
       options.messageId,
       "sendProAccounts.awaitUrl"
@@ -679,8 +812,8 @@ async function sendActivationStep(bot, chatId, user, categoryKey, appKey, planKe
   return sendOrEditMessage(
     bot,
     chatId,
-    texts.activationMethod,
-    buildMethodKeyboard(lang),
+    getMethodCard(lang),
+    buildMethodKeyboard(lang, baseFlow),
     options.messageId,
     "sendProAccounts.methods"
   );
@@ -705,11 +838,16 @@ async function handleMethodSelection(bot, query, appStore, method) {
   const lang = getUserLang(user);
   const texts = getTexts(lang);
   const state = getProState(user.userId);
+  const parts = String(query.data || "").split(":");
+  const routeCategoryKey = parts[3];
+  const routeAppKey = parts[4];
+  const routePlanKey = parts[5];
+  const routeDurationKey = parts[6];
 
-  const category = findCategory(state?.categoryKey);
-  const app = findApp(category, state?.appKey);
-  const plan = findPlan(app, state?.planKey);
-  const duration = findDuration(plan, state?.durationKey);
+  const category = findCategory(routeCategoryKey || state?.categoryKey);
+  const app = findApp(category, routeAppKey || state?.appKey);
+  const plan = findPlan(app, routePlanKey || state?.planKey);
+  const duration = findDuration(plan, routeDurationKey || state?.durationKey);
 
   if (!category || !app || !plan || !duration) {
     await sendProAccountsHome(bot, query.message.chat.id, user, { messageId: query.message.message_id });
@@ -728,7 +866,7 @@ async function handleMethodSelection(bot, query, appStore, method) {
     await sendOrEditMessage(
       bot,
       query.message.chat.id,
-      texts.inputPrompt,
+      getCredentialsCard(lang),
       { inline_keyboard: [[{ text: texts.back, callback_data: `pro:back:methods:${category.key}:${app.key}:${plan.key}:${duration.key}` }]] },
       query.message.message_id,
       "sendProAccounts.awaitCredentials"
@@ -810,6 +948,21 @@ async function confirmOrder(bot, query, appStore) {
     })
   );
 
+  return true;
+}
+
+async function cancelOrder(bot, query, appStore) {
+  const user = appStore.getOrCreateUser(query.from);
+  const lang = getUserLang(user);
+  const texts = getTexts(lang);
+  clearUserState(user.userId);
+  await safeTelegramCall("pro.cancel.userDone", () =>
+    bot.editMessageText(texts.cancelled, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      reply_markup: { inline_keyboard: [[{ text: texts.backMain, callback_data: "menu:main" }]] },
+    })
+  );
   return true;
 }
 
@@ -917,16 +1070,20 @@ async function handleProAccountsCallback(bot, query, appStore) {
       return sendActivationStep(bot, chatId, user, parts[2], parts[3], parts[4], parts[5], { messageId }).then(() => true);
     }
 
-    if (data === "pro:meth:personal") {
+    if (data === "pro:meth:personal" || data.startsWith("pro:meth:personal:")) {
       return handleMethodSelection(bot, query, appStore, "personal");
     }
 
-    if (data === "pro:meth:new") {
+    if (data === "pro:meth:new" || data.startsWith("pro:meth:new:")) {
       return handleMethodSelection(bot, query, appStore, "new");
     }
 
     if (data === "pro:confirm") {
       return confirmOrder(bot, query, appStore);
+    }
+
+    if (data === "pro:cancel") {
+      return cancelOrder(bot, query, appStore);
     }
 
     if (data === "pro:back:apps") {

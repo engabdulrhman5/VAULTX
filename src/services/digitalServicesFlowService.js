@@ -6,7 +6,7 @@ const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { getUserLang } = require("../locales");
 const { escapeHtml } = require("../utils/formatters");
 
-const FRAME = "━━━━━━━━━━━━━━━━━━━━";
+const FRAME = "━━━━━━━━━━━━━━━━━━━";
 
 const DIGITAL_CATALOG = {
   telegram_bots: {

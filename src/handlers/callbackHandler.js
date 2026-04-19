@@ -362,6 +362,9 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
     switch (query.data) {
       case "menu:main":
         clearUserState(user.userId);
+        if (String(query.message?.text || "").includes(t(getUserLang(user), "mainMenu_header"))) {
+          return true;
+        }
         await sendMainMenu(bot, chatId, user, { messageId });
         return true;
 
