@@ -46,6 +46,7 @@ const {
   sendCustomServicePrompt,
 } = require("../services/serviceMenusService");
 const { sendProAccountsHome, handleProAccountsCallback } = require("../services/proAccountsFlowService");
+const { sendCloudServicesHome, handleCloudServicesCallback } = require("../services/cloudServicesFlowService");
 const {
   sendGameTopupCategoriesMenu,
   sendGameTopupGamesMenu,
@@ -295,6 +296,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
     const proHandled = await handleProAccountsCallback(bot, query, appStore);
     if (proHandled) {
+      return true;
+    }
+
+    const cloudHandled = await handleCloudServicesCallback(bot, query, appStore);
+    if (cloudHandled) {
       return true;
     }
 
@@ -605,7 +611,7 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         }
 
         if (query.data === "service:cloud_services") {
-          await sendCloudServicesMenu(bot, chatId, user, { messageId });
+          await sendCloudServicesHome(bot, chatId, user, { messageId });
           return true;
         }
 
