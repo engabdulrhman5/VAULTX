@@ -36,6 +36,7 @@ class AppStore {
         todayDate: new Date().toISOString().slice(0, 10),
       },
       giftCodes: {},
+      temporaryEmailInventory: {},
     };
   }
 
@@ -58,6 +59,9 @@ class AppStore {
       botStats: {
         ...defaults.botStats,
         ...(loaded.botStats || {}),
+      },
+      temporaryEmailInventory: {
+        ...(loaded.temporaryEmailInventory || {}),
       },
     };
     this.transactions = loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || []);
@@ -376,6 +380,45 @@ class AppStore {
     });
     this.persistAll();
     return { ok: true, amount, code };
+  }
+
+  getTemporaryEmailAccounts(sku) {
+    const inventory = this.config.temporaryEmailInventory || {};
+    const rows = inventory[sku];
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  addTemporaryEmailAccount(sku, email, password, addedBy = null) {
+    const inventory = this.config.temporaryEmailInventory || {};
+    const rows = Array.isArray(inventory[sku]) ? inventory[sku] : [];
+    const account = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      email: String(email || "").trim(),
+      password: String(password || "").trim(),
+      addedBy: addedBy ? Number(addedBy) : null,
+      createdAt: new Date().toISOString(),
+    };
+    this.config.temporaryEmailInventory = {
+      ...inventory,
+      [sku]: [...rows, account],
+    };
+    this.persistAll();
+    return account;
+  }
+
+  consumeTemporaryEmailAccount(sku, accountId) {
+    const inventory = this.config.temporaryEmailInventory || {};
+    const rows = Array.isArray(inventory[sku]) ? inventory[sku] : [];
+    const index = rows.findIndex((row) => String(row.id) === String(accountId));
+    if (index === -1) return null;
+
+    const [selected] = rows.splice(index, 1);
+    this.config.temporaryEmailInventory = {
+      ...inventory,
+      [sku]: rows,
+    };
+    this.persistAll();
+    return selected;
   }
 }
 

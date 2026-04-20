@@ -22,6 +22,7 @@ const { handleGameTopupTextInput } = require("../services/gameTopupFlowService")
 const { handleProAccountsTextInput } = require("../services/proAccountsFlowService");
 const { handleCloudServicesTextInput } = require("../services/cloudServicesFlowService");
 const { handleDigitalServicesTextInput } = require("../services/digitalServicesFlowService");
+const { handleTemporaryEmailTextInput } = require("../services/tempEmailFlowService");
 
 async function exportUsersList(bot, chatId, appStore) {
   try {
@@ -379,6 +380,46 @@ async function handleAdminState(bot, msg, appStore) {
       return true;
     }
 
+    if (state.name === "ADMIN_TEMP_EMAIL_UPLOAD_INPUT") {
+      const lang = adminLang;
+      const sku = String(state.sku || "");
+      const lines = String(msg.text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+
+      if (lines.length < 2) {
+        await safeTelegramCall("handleAdminState.tempEmailUpload.invalidFormat", () =>
+          bot.sendMessage(
+            msg.chat.id,
+            lang === "ar"
+              ? "صيغة غير صحيحة. أرسل سطرين:\nالسطر الأول: الإيميل/اسم الحساب\nالسطر الثاني: كلمة المرور/الرمز"
+              : "Invalid format. Send two lines:\nLine 1: email/account\nLine 2: password/code"
+          )
+        );
+        return true;
+      }
+
+      const email = lines[0];
+      const password = lines[1];
+      if (!email || !password) {
+        await safeTelegramCall("handleAdminState.tempEmailUpload.emptyValues", () =>
+          bot.sendMessage(msg.chat.id, lang === "ar" ? "القيم المطلوبة غير مكتملة." : "Required values are missing.")
+        );
+        return true;
+      }
+
+      const saved = appStore.addTemporaryEmailAccount(sku, email, password, msg.from.id);
+      clearUserState(msg.from.id);
+      await safeTelegramCall("handleAdminState.tempEmailUpload.saved", () =>
+        bot.sendMessage(
+          msg.chat.id,
+          lang === "ar"
+            ? `✅ تم حفظ الحساب بنجاح.\n📧 ${saved.email}\n🆔 SKU: ${sku}`
+            : `✅ Account saved successfully.\n📧 ${saved.email}\n🆔 SKU: ${sku}`
+        )
+      );
+      await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
+      return true;
+    }
+
     return false;
   } catch (error) {
     logBotError("handleAdminState", error, { userId: msg.from?.id });
@@ -410,6 +451,11 @@ async function handleTextMessage(bot, msg, appStore) {
 
     const cloudServicesHandled = await handleCloudServicesTextInput(bot, msg, appStore);
     if (cloudServicesHandled) {
+      return;
+    }
+
+    const temporaryEmailsHandled = await handleTemporaryEmailTextInput(bot, msg, appStore);
+    if (temporaryEmailsHandled) {
       return;
     }
 

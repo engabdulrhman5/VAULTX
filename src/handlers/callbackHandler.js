@@ -70,6 +70,13 @@ const { safeTelegramCall } = require("../services/telegramSafe");
 const { getRecentErrors, logBotError } = require("../services/errorLogger");
 const { sendLanguageMenu } = require("./startHandler");
 const { exportUsersList } = require("./messageHandler");
+const {
+  handleTemporaryEmailCallback,
+  buildAdminUploadRootText,
+  buildAdminUploadInputText,
+  getTempEmailGroup,
+  getTempEmailOptionBySku,
+} = require("../services/tempEmailFlowService");
 
 function resolveGrizzlyAppLabel(lang, serviceCode) {
   const { getGrizzlyServiceCode } = require("../constants/grizzly");
@@ -221,9 +228,19 @@ async function handleAdminCallbacks(bot, query, appStore) {
         return true;
 
       case "admin:upload_data":
-        setUserState(ADMIN_ID, "ADMIN_AWAITING_UPLOAD_DATA");
-        await safeTelegramCall("handleAdminCallbacks.upload", () =>
-          bot.sendMessage(chatId, "أرسل JSON أو رابط Google Sheets. هذه خطوة تمهيدية حاليًا. للإلغاء: Cancel")
+        clearUserState(ADMIN_ID);
+        await safeTelegramCall("handleAdminCallbacks.uploadMenu", () =>
+          bot.editMessageText(buildAdminUploadRootText(getUserLang(appStore.findUserById(query.from.id))), {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: getUserLang(appStore.findUserById(query.from.id)) === "ar" ? "📧 قسم إيميلات مؤقتة" : "📧 Temporary Emails Section", callback_data: "adte:root" }],
+                [{ text: getUserLang(appStore.findUserById(query.from.id)) === "ar" ? "🔙 رجوع" : "🔙 Back", callback_data: "admin:panel" }],
+              ],
+            },
+          })
         );
         return true;
 
@@ -269,6 +286,100 @@ async function handleAdminCallbacks(bot, query, appStore) {
       }
 
       default:
+        if (query.data === "adte:root") {
+          const lang = getUserLang(appStore.findUserById(query.from.id));
+          await safeTelegramCall("handleAdminCallbacks.adteRoot", () =>
+            bot.editMessageText(
+              lang === "ar"
+                ? "اختر نوع خدمة الإيميلات المؤقتة لإدارة المخزون:"
+                : "Choose temporary email service type to manage stock:",
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: lang === "ar" ? "📭 إيميل مجاني" : "📭 Free Email", callback_data: "adte:group:free" }],
+                    [{ text: lang === "ar" ? "💼 إيميل أعمال" : "💼 Business Email", callback_data: "adte:group:business" }],
+                    [{ text: lang === "ar" ? "🆔 إيميل دائم" : "🆔 Permanent Email", callback_data: "adte:group:permanent" }],
+                    [{ text: lang === "ar" ? "➕ إيميل بلس" : "➕ Plus Email", callback_data: "adte:group:plus" }],
+                    [{ text: lang === "ar" ? "🔙 رجوع" : "🔙 Back", callback_data: "admin:upload_data" }],
+                  ],
+                },
+              }
+            )
+          );
+          return true;
+        }
+
+        if (query.data === "adte:group:free") {
+          await safeTelegramCall("handleAdminCallbacks.adteFreeInfo", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: getUserLang(appStore.findUserById(query.from.id)) === "ar"
+                ? "إيميل مجاني لا يحتاج رفع بيانات."
+                : "Free email does not require stock upload.",
+              show_alert: true,
+            })
+          );
+          return true;
+        }
+
+        if (query.data.startsWith("adte:group:")) {
+          const groupKey = query.data.split(":")[2];
+          const group = getTempEmailGroup(groupKey);
+          if (!group) return true;
+          const lang = getUserLang(appStore.findUserById(query.from.id));
+          const rows = group.options.map((option) => ([{
+            text: `${lang === "ar" ? option.arName : option.enName} - ${option.price}$`,
+            callback_data: `adte:sku:${option.sku}`,
+          }]));
+          rows.push([{ text: lang === "ar" ? "🔙 رجوع" : "🔙 Back", callback_data: "adte:root" }]);
+
+          await safeTelegramCall("handleAdminCallbacks.adteGroupOptions", () =>
+            bot.editMessageText(
+              lang === "ar"
+                ? "اختر الخيار الذي تريد رفع حسابات له:"
+                : "Choose the option you want to upload accounts for:",
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: { inline_keyboard: rows },
+              }
+            )
+          );
+          return true;
+        }
+
+        if (query.data.startsWith("adte:sku:")) {
+          const sku = query.data.split(":")[2];
+          const option = getTempEmailOptionBySku(sku);
+          if (!option) return true;
+
+          const lang = getUserLang(appStore.findUserById(query.from.id));
+          if (option.custom) {
+            await safeTelegramCall("handleAdminCallbacks.adteCustomInfo", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: lang === "ar"
+                  ? "الإيميل المخصص لا يحتاج مخزون مرفوع."
+                  : "Custom email does not require uploaded stock.",
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          setUserState(ADMIN_ID, "ADMIN_TEMP_EMAIL_UPLOAD_INPUT", { sku });
+          await safeTelegramCall("handleAdminCallbacks.adteSkuPrompt", () =>
+            bot.sendMessage(chatId, buildAdminUploadInputText(lang, option), {
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [[{ text: lang === "ar" ? "❌ إلغاء" : "❌ Cancel", callback_data: "admin:panel" }]],
+              },
+            })
+          );
+          return true;
+        }
+
         if (query.data.startsWith("admin:edit_price:")) {
           const serviceKey = query.data.split(":")[2];
           setUserState(ADMIN_ID, "ADMIN_AWAITING_SERVICE_PRICE", { serviceKey });
@@ -295,7 +406,7 @@ async function handleAdminCallbacks(bot, query, appStore) {
 
 async function handleCallbackQuery(bot, query, appStore, appContext) {
   try {
-    if (query.data.startsWith("admin:")) {
+    if (query.data.startsWith("admin:") || query.data.startsWith("adte:")) {
       return await handleAdminCallbacks(bot, query, appStore);
     }
 
@@ -320,6 +431,11 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 
     const gameTopupHandled = await handleGameTopupCallback(bot, query, appStore);
     if (gameTopupHandled) {
+      return true;
+    }
+
+    const tempEmailsHandled = await handleTemporaryEmailCallback(bot, query, appStore);
+    if (tempEmailsHandled) {
       return true;
     }
 
