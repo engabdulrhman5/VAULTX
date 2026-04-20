@@ -775,18 +775,10 @@ function buildMainMenuKeyboard(lang) {
       ],
       [{ text: `${offerWa.icon} ${label("wa")}`, callback_data: "vnm:app:wa" }],
       [{ text: `${offerTg.icon} ${label("tg")}`, callback_data: "vnm:app:tg" }],
-      [{ text: `🥂 ${label("ig")}`, callback_data: "vnm:app:ig" }],
-      [{ text: `🎯 ${label("fb")}`, callback_data: "vnm:app:fb" }],
-      [{ text: `🐤 ${label("tw")}`, callback_data: "vnm:app:tw" }],
       [
-        { text: `🎬 ${label("tt")}`, callback_data: "vnm:app:tt" },
-        { text: `🌐 ${label("go")}`, callback_data: "vnm:app:go" },
+        { text: `🎯 ${label("fb")}`, callback_data: "vnm:app:fb" },
+        { text: `🥂 ${label("ig")}`, callback_data: "vnm:app:ig" },
       ],
-      [
-        { text: `🧿 ${label("sn")}`, callback_data: "vnm:app:sn" },
-        { text: `🧬 ${label("wc")}`, callback_data: "vnm:app:wc" },
-      ],
-      [{ text: `💎 ${label("im")}`, callback_data: "vnm:app:im" }],
       [{ text: `🧩 ${getText(lang).otherApps}`, callback_data: "vnm:more:0" }],
       [{ text: getText(lang).back, callback_data: "menu:main" }],
     ],
@@ -794,59 +786,78 @@ function buildMainMenuKeyboard(lang) {
 }
 
 function buildMainMenuText(lang, user) {
-  const tx = getText(lang);
+  if (lang === "ar") {
+    return [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ الأرقـــام الـوهـمـيـــة (الـتـطـبـيـق) ❩ ♦️",
+      "💡 نوفر أرقاماً دولية لتفعيل كافة تطبيقات التواصل.",
+      "💡 يمكنك الاستفادة من عروض \"واتساب وتليجرام\" السريعة.",
+      "💡 استلام كود التفعيل (SMS) يتم فوراً داخل البوت.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ يرجى اختيار التطبيق الذي ترغب بتفعيله أدناه ⬇️",
+    ].join("\n");
+  }
   return [
-    tx.title,
-    "",
-    tx.appHelp,
-    "",
-    `- ${lang === "ar" ? "رصيدك" : "Balance"}: <b>${formatPrice(user.balance)}₽</b>`,
-    `- ${lang === "ar" ? "اختر التطبيق المناسب ثم أكمل الخطوات" : "Choose an app then continue the steps"}`,
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    "━━━━━━━━━━━━━━━━━━━",
+    "♦️ ❨ V I R T U A L  N U M B E R S (A P P) ❩ ♦️",
+    "💡 International numbers for social app activation.",
+    "💡 Use fast WhatsApp/Telegram offers instantly.",
+    "💡 SMS code is delivered directly inside the bot.",
+    "━━━━━━━━━━━━━━━━━━━",
+    "⬇️ Choose the app you want to activate ⬇️",
   ].join("\n");
 }
 
-function buildServersKeyboard(lang, appKey) {
-  const tx = getText(lang);
-  return {
-    inline_keyboard: [
-      [{ text: tx.mostAvailable, callback_data: `vnm:best:${appKey}:0` }],
-      [
-        { text: getServerLabel(lang, "server1"), callback_data: `vnm:srv:server1:${appKey}:0` },
-        { text: getServerLabel(lang, "server2"), callback_data: `vnm:srv:server2:${appKey}:0` },
-      ],
-      [{ text: tx.searchCountry, callback_data: `vnm:search:${appKey}` }],
-      [
-        { text: getServerLabel(lang, "server3"), callback_data: `vnm:srv:server3:${appKey}:0` },
-        { text: getServerLabel(lang, "server4"), callback_data: `vnm:srv:server4:${appKey}:0` },
-      ],
-      [{ text: getText(lang).back, callback_data: "service:virtual_numbers" }],
-    ],
-  };
+function buildCountriesHeaderText(lang, appKey) {
+  const appLabel = getAppLabel(lang, appKey);
+  if (lang === "ar") {
+    return [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ اخـتـيـــار دولـــة الـرقـــم ❩ ♦️",
+      `📱 التطبيق المختار: ${appLabel}`,
+      "💡 نوفر أرقاماً من مختلف دول العالم بخوادم متعددة.",
+      "💡 استخدم زر \"البحث\" للوصول السريع لدولتك المفضلة.",
+      "💡 أو اختر من قائمة \"الأكثر توفراً\" لضمان استلام الكود.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ يرجى اختيار الدولة أو استخدام أدوات البحث ⬇️",
+    ].join("\n");
+  }
+  return [
+    "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+    "━━━━━━━━━━━━━━━━━━━",
+    "♦️ ❨ C H O O S E  N U M B E R  C O U N T R Y ❩ ♦️",
+    `📱 Selected app: ${appLabel}`,
+    "💡 Numbers are available from multiple global regions.",
+    "💡 Use search for fast country lookup.",
+    "💡 Or choose most-available countries for quick SMS.",
+    "━━━━━━━━━━━━━━━━━━━",
+    "⬇️ Choose a country or use the tools below ⬇️",
+  ].join("\n");
 }
 
-function buildCountriesKeyboard(lang, appKey, serverKey, countryItems, page, totalPages, rowSize) {
-  const rows = chunk(countryItems, rowSize).map((part) =>
+function buildCountriesKeyboard(lang, appKey, countryItems, page, totalPages) {
+  const tx = getText(lang);
+  const controlRow = [
+    { text: `🔍 ${lang === "ar" ? "بحث عن دولة" : "Search Country"}`, callback_data: `vnm:search:${appKey}` },
+    { text: `🔥 ${lang === "ar" ? "الأكثر توفراً" : "Most Available"}`, callback_data: `vnm:best:${appKey}:0` },
+  ];
+  return {
+    inline_keyboard: [
+      controlRow,
+      ...chunk(countryItems, 2).map((part) =>
     part.map((item) => {
       const country = getCountryLabel(lang, item.countryId);
       return {
         text: `${country.flag} ${country.name}`,
-        callback_data: `vnm:country:${serverKey}:${appKey}:${item.countryId}:${page}`,
+        callback_data: `vnm:country:${appKey}:${item.countryId}:${page}`,
       };
-    })
-  );
-
-  const prevButton = page > 0
-    ? { text: t(lang, "common_previous"), callback_data: `vnm:srv:${serverKey}:${appKey}:${page - 1}` }
-    : { text: " ", callback_data: "noop" };
-  const backButton = { text: t(lang, "common_back"), callback_data: `vnm:app:${appKey}` };
-  const nextButton = page < totalPages - 1
-    ? { text: t(lang, "common_next"), callback_data: `vnm:srv:${serverKey}:${appKey}:${page + 1}` }
-    : { text: " ", callback_data: "noop" };
-
-  return {
-    inline_keyboard: [
-      ...rows,
-      [prevButton, backButton, nextButton],
+      })
+      ),
+      ...buildPageRow(`vnm:app:${appKey}`, page, totalPages),
+      [{ text: tx.back, callback_data: "service:virtual_numbers" }],
     ],
   };
 }
@@ -871,6 +882,36 @@ function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback) {
 
   lines.push([{ text: getText(lang).back, callback_data: backCallback }]);
   return { inline_keyboard: lines };
+}
+
+async function getCountryPriceRows(lang, appKey, countryId) {
+  const [server1, server2] = await Promise.all([
+    getProviderCatalog(appKey, "server1"),
+    getProviderCatalog(appKey, "server2"),
+  ]);
+
+  const normalizedCountry = String(countryId || "").toUpperCase();
+  const rows = [];
+
+  const s1 = server1.find((item) => String(item.countryId).toUpperCase() === normalizedCountry);
+  const s2 = server2.find((item) => String(item.countryId).toUpperCase() === normalizedCountry);
+
+  if (s1 && Number.isFinite(Number(s1.sellPrice)) && Number(s1.sellPrice) > 0) {
+    rows.push({
+      serverKey: "server1",
+      price: Number(s1.sellPrice),
+      label: `${getCountryLabel(lang, normalizedCountry).flag} ${getCountryLabel(lang, normalizedCountry).name} • 1`,
+    });
+  }
+  if (s2 && Number.isFinite(Number(s2.sellPrice)) && Number(s2.sellPrice) > 0) {
+    rows.push({
+      serverKey: "server2",
+      price: Number(s2.sellPrice),
+      label: `${getCountryLabel(lang, normalizedCountry).flag} ${getCountryLabel(lang, normalizedCountry).name} • 2`,
+    });
+  }
+
+  return rows.sort((a, b) => Number(a.price) - Number(b.price));
 }
 
 function buildSearchResultKeyboard(lang, appKey, countryId, rows) {
@@ -1018,7 +1059,7 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
   const retryMarkup = {
     inline_keyboard: [
       [{ text: "🔄 " + (lang === "ar" ? "إعادة المحاولة" : "Retry"), callback_data: `vnm:buy:${serverKey}:${appKey}:${countryId}:${formatPrice(priceValue || 0)}` }],
-      [{ text: tx.back, callback_data: `vnm:srv:${serverKey}:${appKey}:${backPage}` }],
+      [{ text: tx.back, callback_data: `vnm:app:${appKey}:${backPage}` }],
     ],
   };
 
@@ -1026,7 +1067,7 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
     bot.editMessageText(`⏳ ${tx.loading}`, {
       chat_id: chatId,
         message_id: messageId,
-      reply_markup: { inline_keyboard: [[{ text: tx.back, callback_data: `vnm:srv:${serverKey}:${appKey}:${backPage}` }]] },
+      reply_markup: { inline_keyboard: [[{ text: tx.back, callback_data: `vnm:app:${appKey}:${backPage}` }]] },
     })
   );
 
@@ -1247,34 +1288,21 @@ async function handleVirtualNumbersTextInput(bot, msg, appStore) {
       return true;
     }
 
-    const [server1, server2] = await Promise.all([
-      getProviderCatalog(appKey, "server1"),
-      getProviderCatalog(appKey, "server2"),
-    ]);
-    const rows = [];
-    matchedCountries.forEach((country) => {
+    const matchedRows = [];
+    for (const country of matchedCountries) {
       const countryId = String(country.countryId || country.code || "");
-      const s1 = server1.find((item) => String(item.countryId).toUpperCase() === countryId);
-      const s2 = server2.find((item) => String(item.countryId).toUpperCase() === countryId);
-      if (s1) {
-        rows.push({
-          countryId,
-          serverKey: "server1",
-          price: s1.sellPrice,
-          label: `${country.flag} ${lang === "ar" ? country.name_ar : country.name_en} • 1`,
-        });
-      }
-      if (s2) {
-        rows.push({
-          countryId,
-          serverKey: "server2",
-          price: s2.sellPrice,
-          label: `${country.flag} ${lang === "ar" ? country.name_ar : country.name_en} • 2`,
-        });
-      }
-    });
+      const prices = await getCountryPriceRows(lang, appKey, countryId);
+      if (!prices.length) continue;
+      matchedRows.push({
+        countryId,
+        dialCode: country.dialCode || "",
+        flag: country.flag || "🌍",
+        name: lang === "ar" ? (country.name_ar || country.name_en) : (country.name_en || country.name_ar),
+        rows: prices,
+      });
+    }
 
-    if (!rows.length) {
+    if (!matchedRows.length) {
       await safeTelegramCall("virtualNumbersFlow.search.noPrice", () =>
         bot.sendMessage(msg.chat.id, `⚠️ ${text.noPrice}`, {
           reply_markup: { inline_keyboard: [[{ text: text.back, callback_data: `vnm:app:${appKey}` }]] },
@@ -1294,14 +1322,15 @@ async function handleVirtualNumbersTextInput(bot, msg, appStore) {
     const keyboard = {
       inline_keyboard: [
         [
-          { text: text.searchHeaderPrice, callback_data: "noop" },
-          { text: text.searchHeaderServer, callback_data: "noop" },
+          { text: lang === "ar" ? "🧩 الدولة" : "🧩 Country", callback_data: "noop" },
+          { text: lang === "ar" ? "💰 بدءًا من" : "💰 From", callback_data: "noop" },
         ],
-        ...rows.map((row, index) => {
-          const callback = `vnm:buy:${row.serverKey}:${appKey}:${row.countryId}:${formatPrice(row.price)}`;
+        ...matchedRows.map((row, index) => {
+          const callback = `vnm:searchpick:${appKey}:${row.countryId}:0`;
+          const minPrice = row.rows[0]?.price || 0;
           return [
-            { text: `₽ ${formatPrice(row.price)}`, callback_data: callback },
-            { text: `${index + 1}. ${row.label}`, callback_data: callback },
+            { text: `${index + 1}. ${row.flag} ${row.name} ${row.dialCode}`.trim(), callback_data: callback },
+            { text: `₽ ${formatPrice(minPrice)}`, callback_data: callback },
           ];
         }),
         [{ text: text.back, callback_data: `vnm:app:${appKey}` }],
@@ -1351,24 +1380,19 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       query.data = `vnm:app:${normalizeAppKey(appName)}`;
     } else if (raw.startsWith("service_menu:virtual_numbers:server:")) {
       const parts = raw.split(":");
-      const serverKey = parts[3] || "server2";
       const appName = parts[5] || "WhatsApp";
-      query.data = `vnm:srv:${serverKey}:${normalizeAppKey(appName)}:0`;
+      query.data = `vnm:app:${normalizeAppKey(appName)}:0`;
     } else if (raw.startsWith("service_menu:virtual_numbers:prices:")) {
       const parts = raw.split(":");
       const appName = parts[3];
       const page = Number(parts[4] || 0);
-      const state = getUserState(user.userId);
-      const serverKey = state?.vnServer || "server2";
-      query.data = `vnm:srv:${serverKey}:${normalizeAppKey(appName)}:${page}`;
+      query.data = `vnm:app:${normalizeAppKey(appName)}:${page}`;
     } else if (raw.startsWith("service_menu:virtual_numbers:country:")) {
       const parts = raw.split(":");
       const appName = parts[3];
       const countryId = parts[4];
       const page = Number(parts[5] || 0);
-      const state = getUserState(user.userId);
-      const serverKey = state?.vnServer || "server2";
-      query.data = `vnm:country:${serverKey}:${normalizeAppKey(appName)}:${countryId}:${page}`;
+      query.data = `vnm:country:${normalizeAppKey(appName)}:${countryId}:${page}`;
     }
 
     const data = String(query.data || "");
@@ -1381,23 +1405,20 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
 
     if (action === "app") {
       const appKey = normalizeAppKey(parts[2]);
-      setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnServiceCode: getServiceCode(appKey) });
-      const appLabel = getAppLabel(lang, appKey);
-      const displayName = user.firstName || user.username || "User";
-      const body = [
-        lang === "ar" ? `مرحبًا: ${displayName}` : `Welcome: ${displayName}`,
-        "────────────",
-        `${lang === "ar" ? "التطبيق" : "App"}: ${appLabel}`,
-        lang === "ar" ? "اختر أحد السيرفرات التالية" : "Select one of the servers below",
-        lang === "ar" ? "سيرفرات متعددة وسريعة في وصول الكود" : "Multiple fast servers for quicker code delivery",
-      ].join("\n");
+      const page = Math.max(0, Number(parts[3] || 0));
+      setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnServiceCode: getServiceCode(appKey), vnPage: page });
+      const countries = getStaticCountryList();
+      const totalPages = Math.max(1, Math.ceil(countries.length / PAGE_SIZE));
+      const safePage = Math.min(page, totalPages - 1);
+      const pageItems = countries.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+      const body = buildCountriesHeaderText(lang, appKey);
       await sendOrEditMessage(
         bot,
         chatId,
         body,
-        buildServersKeyboard(lang, appKey),
+        buildCountriesKeyboard(lang, appKey, pageItems, safePage, totalPages),
         messageId,
-        "virtualNumbersFlow.appServers"
+        "virtualNumbersFlow.appCountries"
       );
       return true;
     }
@@ -1448,9 +1469,15 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       const safePage = Math.min(page, totalPages - 1);
       const items = countries.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
       const body = [
-        `🎲 <b>${text.mostAvailable}</b>`,
-        "",
-        `🧩 ${getAppLabel(lang, appKey)}`,
+        "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "♦️ ❨ الـدول الأكـثـــر تـوفـــراً 📦 ❩ ♦️" : "♦️ ❨ M O S T  A V A I L A B L E  C O U N T R I E S 📦 ❩ ♦️",
+        `${lang === "ar" ? "📱 التطبيق المختار" : "📱 Selected app"}: ${getAppLabel(lang, appKey)}`,
+        lang === "ar" ? "💡 هذه الدول تمتلك أكبر مخزون من الأرقام حالياً." : "💡 These countries currently have the largest number stock.",
+        lang === "ar" ? "💡 نسبة وصول الكود فيها عالية جداً وشبه مضمونة." : "💡 Code delivery ratio is very high and stable.",
+        lang === "ar" ? "💡 خيار ممتاز للعملاء الذين يحتاجون تفعيلات سريعة." : "💡 Great choice for fast activations.",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "⬇️ يرجى اختيار الدولة ذات التوفر العالي أدناه ⬇️" : "⬇️ Choose a high-availability country below ⬇️",
         `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
       ].join("\n");
       const keyboard = {
@@ -1479,15 +1506,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       const appKey = normalizeAppKey(parts[2]);
       const countryId = parts[3];
       const page = Math.max(0, Number(parts[4] || 0));
-      const [server1, server2] = await Promise.all([
-        getProviderCatalog(appKey, "server1"),
-        getProviderCatalog(appKey, "server2"),
-      ]);
-      const s1 = server1.find((item) => item.countryId === String(countryId));
-      const s2 = server2.find((item) => item.countryId === String(countryId));
-      const rows = [];
-      if (s1) rows.push({ serverKey: "server1", price: s1.sellPrice, label: `${getCountryLabel(lang, countryId).flag} ${getCountryLabel(lang, countryId).name} • 1` });
-      if (s2) rows.push({ serverKey: "server2", price: s2.sellPrice, label: `${getCountryLabel(lang, countryId).flag} ${getCountryLabel(lang, countryId).name} • 2` });
+      const rows = await getCountryPriceRows(lang, appKey, countryId);
       if (!rows.length) {
         await safeTelegramCall("virtualNumbersFlow.bestcountry.empty", () =>
           bot.answerCallbackQuery(query.id, { text: text.noPrice, show_alert: true })
@@ -1496,10 +1515,15 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       }
       const country = getCountryLabel(lang, countryId);
       const body = [
-        text.choosePrice,
-        "",
-        `🧩 ${getAppLabel(lang, appKey)}`,
-        `🌍 ${country.flag} ${country.name}`,
+        "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "♦️ ❨ فـئـــة الـرقـــم والـسـعـــر ❩ ♦️" : "♦️ ❨ N U M B E R  T I E R  &  P R I C E ❩ ♦️",
+        `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
+        lang === "ar" ? "💡 الباقات المتوفرة حالياً لهذه الدولة في جميع خوادمنا." : "💡 Current tiers for this country across all servers.",
+        lang === "ar" ? "💡 الباقات المرتفعة (VIP) تضمن لك وصول الكود أسرع." : "💡 Higher (VIP) tiers usually deliver code faster.",
+        lang === "ar" ? "💡 لا يتم خصم الرصيد إلا عند نجاح استلام كود الـ SMS." : "💡 Balance is charged only when purchase succeeds.",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "⬇️ يرجى اختيار فئة الرقم المناسبة لك لبدء التفعيل ⬇️" : "⬇️ Choose the suitable number tier to start activation ⬇️",
       ].join("\n");
       await sendOrEditMessage(
         bot,
@@ -1515,17 +1539,8 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
     if (action === "searchpick") {
       const appKey = normalizeAppKey(parts[2]);
       const countryId = String(parts[3] || "").toUpperCase();
-      const [server1, server2] = await Promise.all([
-        getProviderCatalog(appKey, "server1"),
-        getProviderCatalog(appKey, "server2"),
-      ]);
-
-      const s1 = server1.find((item) => String(item.countryId).toUpperCase() === countryId);
-      const s2 = server2.find((item) => String(item.countryId).toUpperCase() === countryId);
-      const rows = [];
+      const rows = await getCountryPriceRows(lang, appKey, countryId);
       const country = getCountryLabel(lang, countryId);
-      if (s1) rows.push({ serverKey: "server1", price: s1.sellPrice, label: `${country.flag} ${country.name} • 1` });
-      if (s2) rows.push({ serverKey: "server2", price: s2.sellPrice, label: `${country.flag} ${country.name} • 2` });
       if (!rows.length) {
         await safeTelegramCall("virtualNumbersFlow.searchpick.empty", () =>
           bot.answerCallbackQuery(query.id, { text: text.noPrice, show_alert: true })
@@ -1533,10 +1548,12 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         return true;
       }
       const body = [
-        `🔎 <b>${text.searchCountry}</b>`,
-        "",
-        `🧩 ${getAppLabel(lang, appKey)}`,
-        `🌍 ${country.flag} ${country.name} ${country.dialCode || ""}`,
+        "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "♦️ ❨ فـئـــة الـرقـــم والـسـعـــر ❩ ♦️" : "♦️ ❨ N U M B E R  T I E R  &  P R I C E ❩ ♦️",
+        `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "⬇️ اختر فئة السعر المناسبة ⬇️" : "⬇️ Choose the suitable price tier ⬇️",
       ].join("\n");
       await sendOrEditMessage(
         bot,
@@ -1556,13 +1573,56 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       const totalPages = Math.max(1, Math.ceil(offers.length / OFFER_LIMIT));
       const safePage = Math.min(page, totalPages - 1);
       const pageItems = offers.slice(safePage * OFFER_LIMIT, safePage * OFFER_LIMIT + OFFER_LIMIT);
-      const appLabel = getAppLabel(lang, appKey);
-      const body = [
-        text.offersTitle.replace("{app}", appLabel),
-        "",
-        text.offersHint,
-        `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
-      ].join("\n");
+      let body;
+      if (appKey === "wa" && lang === "ar") {
+        body = [
+          "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+          "━━━━━━━━━━━━━━━━━━━",
+          "♦️ ❨ عـــروض واتـســـاب 🔥 ❩ ♦️",
+          "💡 قائمة بأفضل الدول والأكثر طلباً لتفعيل الواتساب.",
+          "💡 نضمن لك أرخص الأسعار وسرعة عالية في الاستلام.",
+          "💡 الأرقام في هذه القائمة تتجدد وتتوفر بكميات كبيرة.",
+          "━━━━━━━━━━━━━━━━━━━",
+          "⬇️ يرجى اختيار الدولة لبدء تفعيل الواتساب ⬇️",
+          `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
+        ].join("\n");
+      } else if (appKey === "tg" && lang === "ar") {
+        body = [
+          "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+          "━━━━━━━━━━━━━━━━━━━",
+          "♦️ ❨ عـــروض تـلـيـجـــرام ✈️ ❩ ♦️",
+          "💡 الدول الأفضل والأرخص لتفعيل حسابات تليجرام.",
+          "💡 أرقام نقية ومستقرة تقلل من احتمالية الحظر (Ban).",
+          "💡 سرعة فائقة ومضمونة في وصول كود التفعيل (OTP).",
+          "━━━━━━━━━━━━━━━━━━━",
+          "⬇️ يرجى اختيار الدولة لبدء تفعيل التليجرام ⬇️",
+          `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
+        ].join("\n");
+      } else if (appKey === "wa") {
+        body = [
+          "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+          "━━━━━━━━━━━━━━━━━━━",
+          "♦️ ❨ W H A T S A P P  O F F E R S 🔥 ❩ ♦️",
+          "💡 Top countries with the best WhatsApp activation demand.",
+          "💡 Optimized for lower prices and faster code delivery.",
+          "💡 Stock updates continuously for stable availability.",
+          "━━━━━━━━━━━━━━━━━━━",
+          "⬇️ Choose a country to start WhatsApp activation ⬇️",
+          `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
+        ].join("\n");
+      } else {
+        body = [
+          "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+          "━━━━━━━━━━━━━━━━━━━",
+          "♦️ ❨ T E L E G R A M  O F F E R S ✈️ ❩ ♦️",
+          "💡 Best low-cost countries for Telegram activations.",
+          "💡 Cleaner and more stable numbers with lower ban chance.",
+          "💡 Fast OTP delivery for instant activation workflows.",
+          "━━━━━━━━━━━━━━━━━━━",
+          "⬇️ Choose a country to start Telegram activation ⬇️",
+          `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
+        ].join("\n");
+      }
 
       await sendOrEditMessage(
         bot,
@@ -1591,75 +1651,18 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
     }
 
     if (action === "srv") {
-      const serverKey = parts[2];
       const appKey = normalizeAppKey(parts[3]);
       const page = Math.max(0, Number(parts[4] || 0));
-      const providerKey = SERVER_LIST.find((server) => server.key === serverKey)?.providerKey;
-      const rowSize = 2;
-
-      setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnServer: serverKey, vnServiceCode: getServiceCode(appKey) });
-
-      let countries = [];
-      if (providerKey) {
-        countries = await getProviderCatalog(appKey, providerKey);
-      } else {
-        countries = getStaticCountryList();
-      }
-
-      const totalPages = Math.max(1, Math.ceil(countries.length / PAGE_SIZE));
-      const safePage = Math.min(page, totalPages - 1);
-      const pageItems = countries.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-      const appLabel = getAppLabel(lang, appKey);
-
-      const body = [
-        `${lang === "ar" ? "التطبيق" : "App"}: ${appLabel}`,
-        `${lang === "ar" ? "السيرفر" : "Server"}: ${getServerLabel(lang, serverKey)}`,
-        `${lang === "ar" ? "الدول المعروضة في هذه الصفحة" : "Countries on this page"}: ${pageItems.length}`,
-        lang === "ar" ? "اختر الدولة لعرض سعر الرقم المتاح مباشرة" : "Choose country to view available number prices",
-        lang === "ar" ? "الأسعار محدثة تلقائيًا ويظهر المتاح فقط" : "Prices are refreshed automatically and show available stock only",
-        `${text.pageLabel}: ${safePage + 1}/${totalPages}`,
-      ].join("\n");
-
-      await sendOrEditMessage(
-        bot,
-        chatId,
-        body,
-        buildCountriesKeyboard(lang, appKey, serverKey, pageItems, safePage, totalPages, rowSize),
-        messageId,
-        "virtualNumbersFlow.serverCountries"
-      );
-      return true;
+      query.data = `vnm:app:${appKey}:${page}`;
+      return handleVirtualNumbersCallback(bot, query, appStore);
     }
 
     if (action === "country") {
-      const serverKey = parts[2];
-      const appKey = normalizeAppKey(parts[3]);
-      const countryId = parts[4];
-      const page = Math.max(0, Number(parts[5] || 0));
-      const providerKey = SERVER_LIST.find((server) => server.key === serverKey)?.providerKey;
-
-      setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnServer: serverKey, vnCountry: countryId, vnPage: page });
-
-      const rows = [];
-      if (providerKey) {
-        const serviceCode = getServiceCode(appKey);
-        const providerCountryId = resolveProviderCountryId(serverKey, countryId);
-        const prices = await getServicePrices(serviceCode, providerKey);
-        const price = calculateSellPrice(extractPrice(prices, providerCountryId, serviceCode));
-        if (Number.isFinite(price) && price > 0) {
-          rows.push({
-            serverKey,
-            price,
-            label: `${getCountryLabel(lang, countryId).flag} ${getCountryLabel(lang, countryId).name} • ${serverKey === "server1" ? "1" : serverKey === "server2" ? "2" : serverKey === "server3" ? "3" : "4"}`,
-          });
-        }
-      } else {
-        rows.push({
-          serverKey,
-          price: 10,
-          label: `${getCountryLabel(lang, countryId).flag} ${getCountryLabel(lang, countryId).name} • ${serverKey === "server1" ? "1" : serverKey === "server2" ? "2" : serverKey === "server3" ? "3" : "4"}`,
-        });
-      }
+      const appKey = normalizeAppKey(parts[2]);
+      const countryId = parts[3];
+      const page = Math.max(0, Number(parts[4] || 0));
+      setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnCountry: countryId, vnPage: page });
+      const rows = await getCountryPriceRows(lang, appKey, countryId);
 
       if (!rows.length) {
         await safeTelegramCall("virtualNumbersFlow.country.noPrice", () =>
@@ -1670,18 +1673,22 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
 
       const country = getCountryLabel(lang, countryId);
       const body = [
-        `${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)}`,
-        `${lang === "ar" ? "السيرفر" : "Server"}: ${serverKey.replace("server", "")}`,
-        `${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name} ${country.dialCode || ""}`,
-        lang === "ar" ? "اختر الصف المناسب وسيتم الشراء مباشرة" : "Select a row and purchase will start instantly",
-        lang === "ar" ? "الأسعار من التحديث الثابت اليومي (24 ساعة)" : "Prices are from daily fixed cache (24h)",
+        "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "♦️ ❨ فـئـــة الـرقـــم والـسـعـــر ❩ ♦️" : "♦️ ❨ N U M B E R  T I E R  &  P R I C E ❩ ♦️",
+        `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
+        lang === "ar" ? "💡 الباقات المتوفرة حالياً لهذه الدولة في جميع خوادمنا." : "💡 Current tiers for this country across all servers.",
+        lang === "ar" ? "💡 الباقات المرتفعة (VIP) تضمن لك وصول الكود أسرع." : "💡 Higher (VIP) tiers usually deliver code faster.",
+        lang === "ar" ? "💡 لا يتم خصم الرصيد إلا عند نجاح استلام كود الـ SMS." : "💡 Balance is charged only when purchase succeeds.",
+        "━━━━━━━━━━━━━━━━━━━",
+        lang === "ar" ? "⬇️ يرجى اختيار فئة الرقم المناسبة لك لبدء التفعيل ⬇️" : "⬇️ Choose the suitable number tier to start activation ⬇️",
       ].join("\n");
 
       await sendOrEditMessage(
         bot,
         chatId,
         body,
-        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:srv:${serverKey}:${appKey}:${page}`),
+        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:app:${appKey}:${page}`),
         messageId,
         "virtualNumbersFlow.countryPrice"
       );
