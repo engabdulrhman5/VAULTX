@@ -28,6 +28,8 @@ const {
   sendTopupHome,
   sendCountryTopupMenu,
   sendStarsPrompt,
+  sendCryptoAssetPrompt,
+  sendCryptoAmountPrompt,
   sendPlaceholderTopupMethod,
   createStarsInvoice,
 } = require("../services/topupService");
@@ -1134,6 +1136,29 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           return true;
         }
 
+        if (query.data === "topup:auto:crypto") {
+          clearUserState(user.userId);
+          await sendCryptoAssetPrompt(bot, chatId, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
+        if (query.data.startsWith("topup:crypto:asset:")) {
+          const asset = String(query.data.split(":")[3] || "").toUpperCase();
+          if (!asset) {
+            await safeTelegramCall("handleCallbackQuery.invalidCryptoAsset", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: "عملة غير صالحة.",
+                show_alert: true,
+              })
+            );
+            return true;
+          }
+
+          setUserState(user.userId, "AWAITING_TOPUP_CRYPTO_AMOUNT", { asset });
+          await sendCryptoAmountPrompt(bot, chatId, asset, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
         if (query.data.startsWith("topup:stars:pay:")) {
           const amountRub = Number(query.data.split(":")[3]);
           if (!Number.isFinite(amountRub) || amountRub <= 0) {
@@ -1155,7 +1180,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
             "topup:auto:binance": "Binance Pay",
             "topup:auto:vodafone": "Vodafone Cash",
             "topup:auto:jeeb": "محفظة جيب",
-            "topup:auto:crypto": "Crypto",
             "topup:placeholder:stc_pay": "STC Pay",
             "topup:placeholder:mobily_pay": "Mobily Pay",
             "topup:placeholder:saudi_bank": "تحويل بنكي",

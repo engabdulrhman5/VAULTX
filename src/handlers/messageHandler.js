@@ -10,7 +10,7 @@ const {
   sendServicePricesMenu,
   sendServiceToggleMenu,
 } = require("../services/profileService");
-const { sendStarsCheckout } = require("../services/topupService");
+const { sendStarsCheckout, createCryptoInvoiceForRub, sendCryptoInvoiceCheckout } = require("../services/topupService");
 const { safeTelegramCall } = require("../services/telegramSafe");
 const { logBotError } = require("../services/errorLogger");
 const { formatRuble, escapeHtml, getDisplayName } = require("../utils/formatters");
@@ -129,41 +129,84 @@ async function handleTransferInput(bot, msg, appStore) {
     return false;
   }
 }
-async function handleTopupStarsAmountInput(bot, msg) {
+async function handleTopupAmountInput(bot, msg, appStore) {
   try {
     const state = getUserState(msg.from.id);
-    if (!state || state.name !== "AWAITING_TOPUP_STARS_AMOUNT") {
+    if (!state || (state.name !== "AWAITING_TOPUP_STARS_AMOUNT" && state.name !== "AWAITING_TOPUP_CRYPTO_AMOUNT")) {
       return false;
     }
+    const user = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
+    const lang = getUserLang(user);
 
     if (msg.text.trim().toLowerCase() === "cancel") {
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleTopupStarsAmountInput.cancel", () =>
-        bot.sendMessage(msg.chat.id, "طھظ… ط¥ظ„ط؛ط§ط، ط¹ظ…ظ„ظٹط© ط´ط­ظ† ط§ظ„ط±طµظٹط¯.")
+      await safeTelegramCall("handleTopupAmountInput.cancel", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "تم إلغاء عملية الشحن." : "Top-up flow cancelled.")
       );
       return true;
     }
 
-    if (!/^\d+$/.test(msg.text.trim())) {
-      await safeTelegramCall("handleTopupStarsAmountInput.invalidText", () =>
-        bot.sendMessage(msg.chat.id, "â‌Œ ط§ظ„ط±ط¬ط§ط، ط¥ط¯ط®ط§ظ„ ط±ظ‚ظ… طµط­ظٹط­ ظپظ‚ط· ظ„ط¹ط¯ط¯ ط§ظ„ط±ظˆط¨ظ„.")
+    if (!/^\d+(\.\d+)?$/.test(msg.text.trim())) {
+      await safeTelegramCall("handleTopupAmountInput.invalidText", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ أدخل رقماً صحيحاً للمبلغ." : "❌ Enter a valid numeric amount.")
       );
       return true;
     }
 
     const amountRub = Number(msg.text.trim());
     if (!Number.isFinite(amountRub) || amountRub <= 0) {
-      await safeTelegramCall("handleTopupStarsAmountInput.invalidAmount", () =>
-        bot.sendMessage(msg.chat.id, "â‌Œ ظٹط¬ط¨ ط£ظ† ظٹظƒظˆظ† ط§ظ„ظ…ط¨ظ„ط؛ ط£ظƒط¨ط± ظ…ظ† طµظپط±.")
+      await safeTelegramCall("handleTopupAmountInput.invalidAmount", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ يجب أن يكون المبلغ أكبر من صفر." : "❌ Amount must be greater than zero.")
       );
       return true;
     }
 
+    if (state.name === "AWAITING_TOPUP_STARS_AMOUNT") {
+      clearUserState(msg.from.id);
+      await sendStarsCheckout(bot, msg.chat.id, amountRub, lang);
+      return true;
+    }
+
+    const asset = String(state.asset || "").toUpperCase();
+    if (!asset) {
+      clearUserState(msg.from.id);
+      await safeTelegramCall("handleTopupAmountInput.missingAsset", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ لم يتم تحديد العملة." : "❌ Currency is not selected.")
+      );
+      return true;
+    }
+
+    const invoice = await createCryptoInvoiceForRub(msg.from.id, amountRub, asset);
     clearUserState(msg.from.id);
-    await sendStarsCheckout(bot, msg.chat.id, amountRub);
+
+    appStore.addTransaction({
+      type: "topup_crypto_pending",
+      userId: msg.from.id,
+      amount: amountRub,
+      cryptoAsset: invoice.asset,
+      cryptoAssetAmount: invoice.amountAsset,
+      cryptoInvoiceId: invoice.invoiceId,
+      method: `Crypto Pay (${invoice.asset})`,
+      serviceKey: "balance_topup",
+      status: "pending",
+      payload: invoice.payload,
+    });
+
+    await sendCryptoInvoiceCheckout(bot, msg.chat.id, {
+      amountRub,
+      amountAsset: invoice.amountAsset,
+      asset: invoice.asset,
+      payUrl: invoice.payUrl,
+    }, { lang });
+
     return true;
   } catch (error) {
-    logBotError("handleTopupStarsAmountInput", error, { userId: msg.from?.id });
+    logBotError("handleTopupAmountInput", error, { userId: msg.from?.id });
+    const user = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
+    const lang = getUserLang(user);
+    await safeTelegramCall("handleTopupAmountInput.replyError", () =>
+      bot.sendMessage(msg.chat.id, lang === "ar" ? "تعذر إنشاء الفاتورة حالياً." : "Unable to create invoice right now.")
+    );
     return false;
   }
 }
@@ -479,7 +522,7 @@ async function handleTextMessage(bot, msg, appStore) {
       return;
     }
 
-    const topupHandled = await handleTopupStarsAmountInput(bot, msg, appStore);
+    const topupHandled = await handleTopupAmountInput(bot, msg, appStore);
     if (topupHandled) {
       return;
     }

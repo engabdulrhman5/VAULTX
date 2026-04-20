@@ -8,6 +8,7 @@ const adminIds = String(process.env.ADMIN_IDS || process.env.ADMIN_ID || "")
   .filter(Number.isFinite);
 const ADMIN_ID = adminIds[0] || null;
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_TOKEN || process.env.CRYPTO_BOT_TOKEN || "";
 const LOG_CHANNEL_ID = Number(process.env.LOG_CHANNEL_ID || -1003822505585);
 const ACTIVATIONS_CHANNEL_ID = Number(process.env.ACTIVATIONS_CHANNEL_ID || -1003311851705);
 const PRO_ACCOUNTS_CHANNEL_ID = Number(process.env.PRO_ACCOUNTS_CHANNEL_ID || -1003869626536);
@@ -17,6 +18,7 @@ module.exports = {
   ADMIN_ID,
   ADMIN_IDS: adminIds,
   BOT_TOKEN,
+  CRYPTO_PAY_TOKEN,
   LOG_CHANNEL_ID,
   ACTIVATIONS_CHANNEL_ID,
   PRO_ACCOUNTS_CHANNEL_ID,

@@ -1,7 +1,7 @@
 require("dotenv").config();
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
-const { BOT_TOKEN } = require("./config");
+const { BOT_TOKEN, ADMIN_CHANNEL_ID } = require("./config");
 const { AppStore } = require("./services/appStore");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
@@ -25,6 +25,7 @@ const { handleTextMessage } = require("./handlers/messageHandler");
 const { handleCallbackQuery } = require("./handlers/callbackHandler");
 const { handleVirtualNumbersCallback } = require("./services/virtualNumbersFlowService");
 const { handlePreCheckoutQuery, handleSuccessfulPayment } = require("./handlers/paymentHandler");
+const { notifyTopupChannel, convertAssetAmountToRub } = require("./services/topupService");
 const {
   setupBotCommands,
   handleMenuCommand,
@@ -36,20 +37,6 @@ const {
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
-}
-
-const renderPort = Number(process.env.PORT || 0);
-if (Number.isFinite(renderPort) && renderPort > 0) {
-  http.createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    if (req.url === "/") {
-      res.end("I am alive");
-      return;
-    }
-    res.end("OK");
-  }).listen(renderPort, "0.0.0.0", () => {
-    console.log(`[web] health endpoint listening on :${renderPort}`);
-  });
 }
 
 const telegramProxyUrl = String(process.env.TELEGRAM_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
@@ -78,6 +65,161 @@ const appContext = {
 };
 let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
+
+async function handleCryptoWebhookEvent(event) {
+  const invoiceId = Number(event?.invoice_id);
+  const status = String(event?.status || "").toLowerCase();
+  if (!Number.isFinite(invoiceId) || status !== "paid") {
+    return { ok: true, ignored: true };
+  }
+
+  const duplicate = appStore.transactions.find((tx) =>
+    tx.type === "topup_crypto_paid" && Number(tx.cryptoInvoiceId) === invoiceId
+  );
+  if (duplicate) {
+    return { ok: true, duplicate: true };
+  }
+
+  const payloadRaw = String(event?.payload || "");
+  let payloadData = null;
+  try {
+    payloadData = JSON.parse(payloadRaw);
+  } catch (_) {
+    payloadData = null;
+  }
+
+  const payloadUserId = Number(payloadData?.user_id);
+  const pendingTx = appStore.transactions.find((tx) =>
+    tx.type === "topup_crypto_pending" && Number(tx.cryptoInvoiceId) === invoiceId
+  );
+
+  const userId = Number.isFinite(payloadUserId)
+    ? payloadUserId
+    : Number(pendingTx?.userId || 0);
+
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error(`Webhook payload user_id missing for invoice ${invoiceId}`);
+  }
+
+  const paidAsset = String(event?.paid_asset || event?.asset || pendingTx?.cryptoAsset || "").toUpperCase();
+  const paidAmountRaw = Number(event?.paid_amount || event?.amount || pendingTx?.cryptoAssetAmount || 0);
+
+  if (!paidAsset || !Number.isFinite(paidAmountRaw) || paidAmountRaw <= 0) {
+    throw new Error(`Invalid paid asset/amount for invoice ${invoiceId}`);
+  }
+
+  let creditedRub = 0;
+  try {
+    creditedRub = await convertAssetAmountToRub(paidAmountRaw, paidAsset);
+  } catch (_) {
+    creditedRub = Number(payloadData?.amount_rub || pendingTx?.amount || 0);
+  }
+
+  if (!Number.isFinite(creditedRub) || creditedRub <= 0) {
+    throw new Error(`Invalid converted RUB amount for invoice ${invoiceId}`);
+  }
+
+  appStore.addBalance(userId, creditedRub);
+  appStore.addDeposit(userId, creditedRub);
+  const updatedUser = appStore.incrementTransactions(userId);
+
+  appStore.addTransaction({
+    type: "topup_crypto_paid",
+    userId,
+    amount: creditedRub,
+    method: `Crypto Pay (${paidAsset})`,
+    cryptoAsset: paidAsset,
+    cryptoPaidAmount: paidAmountRaw,
+    cryptoInvoiceId: invoiceId,
+    serviceKey: "balance_topup",
+    externalPayload: payloadRaw,
+  });
+
+  if (pendingTx && pendingTx.id) {
+    appStore.updateTransactionById(pendingTx.id, {
+      status: "paid",
+      paidAt: new Date().toISOString(),
+      paidAsset,
+      paidAmount: paidAmountRaw,
+      paidRub: creditedRub,
+    });
+  }
+
+  const lang = getUserLang(updatedUser || appStore.findUserById(userId) || { language: "ar" });
+  await safeTelegramCall("cryptoWebhook.notifyUser", () =>
+    bot.sendMessage(
+      userId,
+      lang === "ar"
+        ? `✅ تم شحن رصيدك بنجاح عبر Crypto Pay\n💰 المبلغ: ${creditedRub} RUB`
+        : `✅ Your balance has been topped up via Crypto Pay\n💰 Amount: ${creditedRub} RUB`
+    )
+  );
+
+  await notifyTopupChannel(bot, userId, creditedRub, lang, `Crypto Pay (${paidAsset})`);
+
+  await safeTelegramCall("cryptoWebhook.notifyAdmin", () =>
+    bot.sendMessage(
+      ADMIN_CHANNEL_ID,
+      [
+        "<b>Crypto Top-up Success</b>",
+        `User ID: <code>${userId}</code>`,
+        `Invoice ID: <code>${invoiceId}</code>`,
+        `Paid: ${paidAmountRaw} ${paidAsset}`,
+        `Credited: ${creditedRub} RUB`,
+      ].join("\n"),
+      { parse_mode: "HTML", disable_notification: true }
+    )
+  );
+
+  return { ok: true };
+}
+
+const renderPort = Number(process.env.PORT || 0);
+if (Number.isFinite(renderPort) && renderPort > 0) {
+  http.createServer(async (req, res) => {
+    try {
+      if (req.method === "GET" && req.url === "/") {
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("I am alive");
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/crypto-webhook") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > 2 * 1024 * 1024) {
+            req.destroy();
+          }
+        });
+
+        req.on("end", async () => {
+          try {
+            const parsed = body ? JSON.parse(body) : {};
+            const event = parsed?.payload || parsed;
+            const result = await handleCryptoWebhookEvent(event);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          } catch (error) {
+            logBotError("http.crypto_webhook", error, { body });
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "invalid webhook payload" }));
+          }
+        });
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("OK");
+    } catch (error) {
+      logBotError("http.server", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false }));
+    }
+  }).listen(renderPort, "0.0.0.0", () => {
+    console.log(`[web] health endpoint listening on :${renderPort}`);
+  });
+}
 
 function buildVerifyUrl(serviceCode, number) {
   const normalizedNumber = String(number || "").replace(/[^\d+]/g, "");
