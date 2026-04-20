@@ -1,9 +1,11 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const { ADMIN_ID, USERS_EXPORT_PATH } = require("../config");
 const { clearUserState, getUserState, setUserState } = require("../services/stateStore");
 const {
   sendMainMenu,
+  sendTransferHome,
+  sendTransferConfirm,
   sendAdminPanel,
   sendServicePricesMenu,
   sendServiceToggleMenu,
@@ -44,136 +46,88 @@ async function exportUsersList(bot, chatId, appStore) {
 async function handleTransferInput(bot, msg, appStore) {
   try {
     const state = getUserState(msg.from.id);
-    if (!state || state.name !== "AWAITING_TRANSFER") {
+    if (!state || state.name !== "AWAITING_TRANSFER_PAYLOAD") {
       return false;
     }
 
-    if (msg.text.trim().toLowerCase() === "cancel") {
+    const sender = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
+    const lang = getUserLang(sender);
+    const text = String(msg.text || "").trim();
+
+    if (text.toLowerCase() === "cancel") {
       clearUserState(msg.from.id);
-      const user = appStore.findUserById(msg.from.id);
       await safeTelegramCall("handleTransferInput.cancel", () =>
-        bot.sendMessage(msg.chat.id, "تم إلغاء عملية تحويل الرصيد.")
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "تم إلغاء عملية التحويل." : "Transfer has been canceled.")
       );
-      await sendMainMenu(bot, msg.chat.id, user);
+      await sendTransferHome(bot, msg.chat.id, sender);
       return true;
     }
 
-    const lines = msg.text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
     if (lines.length !== 2) {
       await safeTelegramCall("handleTransferInput.invalidFormat", () =>
-        bot.sendMessage(msg.chat.id, "الرجاء إرسال سطرين فقط: السطر الأول ID والسطر الثاني المبلغ.")
+        bot.sendMessage(
+          msg.chat.id,
+          lang === "ar"
+            ? "أرسل البيانات بهذا الشكل:\nالسطر الأول: آيدي المستلم\nالسطر الثاني: المبلغ"
+            : "Send exactly two lines:\nLine 1: Receiver ID\nLine 2: Amount"
+        )
       );
       return true;
     }
 
-    const sender = appStore.findUserById(msg.from.id);
     const targetUserId = Number(lines[0]);
     const amount = Number(lines[1]);
     const receiver = appStore.findUserById(targetUserId);
 
     if (!receiver) {
       await safeTelegramCall("handleTransferInput.receiverMissing", () =>
-        bot.sendMessage(msg.chat.id, "المستخدم الهدف غير موجود.")
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "هذا الآيدي غير مسجل في البوت." : "This user ID is not registered in the bot.")
       );
       return true;
     }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (Number(sender.userId) === Number(receiver.userId)) {
+      await safeTelegramCall("handleTransferInput.selfTransfer", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "لا يمكنك التحويل إلى نفسك." : "You cannot transfer to yourself.")
+      );
+      return true;
+    }
+
+    if (!Number.isFinite(amount) || amount < 10) {
       await safeTelegramCall("handleTransferInput.invalidAmount", () =>
-        bot.sendMessage(msg.chat.id, "المبلغ غير صالح.")
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "المبلغ غير صالح. الحد الأدنى 10 روبل." : "Invalid amount. Minimum is 10 RUB.")
       );
       return true;
     }
 
-    if (sender.balance < amount) {
+    if (Number(sender.balance || 0) < amount) {
       await safeTelegramCall("handleTransferInput.insufficient", () =>
-        bot.sendMessage(msg.chat.id, "رصيدك غير كافٍ.")
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "رصيدك غير كافٍ." : "Insufficient balance.")
       );
       return true;
     }
 
-    appStore.deductBalance(sender.userId, amount);
-    appStore.addBalance(receiver.userId, amount);
-    const updatedSender = appStore.incrementTransactions(sender.userId);
-    appStore.incrementTransactions(receiver.userId);
-
-    appStore.addTransaction({
-      type: "transfer_out",
-      userId: sender.userId,
+    setUserState(sender.userId, "AWAITING_TRANSFER_CONFIRM", {
       targetUserId: receiver.userId,
       amount,
     });
-    appStore.addTransaction({
-      type: "transfer_in",
-      userId: receiver.userId,
-      targetUserId: sender.userId,
-      amount,
-    });
 
-    await notifyAdmin(
-      bot,
-      [
-        "<b>User Transfer</b>",
-        `From: <code>${sender.userId}</code>`,
-        `To: <code>${receiver.userId}</code>`,
-        `Amount: ${formatRuble(amount)} RUB`,
-      ].join("\n")
+    await safeTelegramCall("handleTransferInput.confirmPrompt", () =>
+      sendTransferConfirm(bot, msg.chat.id, sender, {
+        senderName: getDisplayName(sender),
+        receiverName: getDisplayName(receiver),
+        receiverId: receiver.userId,
+        amount,
+      })
     );
 
-    if (sender.invitedBy && sender.referralCommissionCount < 2) {
-      const referrer = appStore.findUserById(sender.invitedBy);
-      if (referrer) {
-        const commission = Number((amount * 0.1).toFixed(2));
-        appStore.addBalance(referrer.userId, commission);
-        appStore.updateUser(sender.userId, {
-          referralCommissionCount: sender.referralCommissionCount + 1,
-        });
-        appStore.addTransaction({
-          type: "referral_commission",
-          userId: referrer.userId,
-          targetUserId: sender.userId,
-          amount: commission,
-        });
-        await safeTelegramCall("handleTransferInput.referralCommission", () =>
-          bot.sendMessage(referrer.userId, `تمت إضافة عمولة إحالة بقيمة ${formatRuble(commission)} RUB إلى رصيدك.`)
-        );
-      }
-    }
-
-    clearUserState(sender.userId);
-
-    await safeTelegramCall("handleTransferInput.senderNotify", () =>
-      bot.sendMessage(
-        msg.chat.id,
-        [
-          "<b>=== تم تحويل الرصيد بنجاح ===</b>",
-          "",
-          `تم إرسال ${formatRuble(amount)} RUB إلى <code>${receiver.userId}</code>.`,
-        ].join("\n"),
-        { parse_mode: "HTML" }
-      )
-    );
-
-    await safeTelegramCall("handleTransferInput.receiverNotify", () =>
-      bot.sendMessage(
-        receiver.userId,
-        [
-          "<b>=== تم استلام رصيد ===</b>",
-          "",
-          `استلمت ${formatRuble(amount)} RUB من ${escapeHtml(getDisplayName(sender))}.`,
-        ].join("\n"),
-        { parse_mode: "HTML" }
-      )
-    );
-
-    await sendMainMenu(bot, msg.chat.id, updatedSender);
     return true;
   } catch (error) {
     logBotError("handleTransferInput", error, { userId: msg.from?.id });
     return false;
   }
 }
-
 async function handleTopupStarsAmountInput(bot, msg) {
   try {
     const state = getUserState(msg.from.id);
@@ -184,14 +138,14 @@ async function handleTopupStarsAmountInput(bot, msg) {
     if (msg.text.trim().toLowerCase() === "cancel") {
       clearUserState(msg.from.id);
       await safeTelegramCall("handleTopupStarsAmountInput.cancel", () =>
-        bot.sendMessage(msg.chat.id, "تم إلغاء عملية شحن الرصيد.")
+        bot.sendMessage(msg.chat.id, "طھظ… ط¥ظ„ط؛ط§ط، ط¹ظ…ظ„ظٹط© ط´ط­ظ† ط§ظ„ط±طµظٹط¯.")
       );
       return true;
     }
 
     if (!/^\d+$/.test(msg.text.trim())) {
       await safeTelegramCall("handleTopupStarsAmountInput.invalidText", () =>
-        bot.sendMessage(msg.chat.id, "❌ الرجاء إدخال رقم صحيح فقط لعدد الروبل.")
+        bot.sendMessage(msg.chat.id, "â‌Œ ط§ظ„ط±ط¬ط§ط، ط¥ط¯ط®ط§ظ„ ط±ظ‚ظ… طµط­ظٹط­ ظپظ‚ط· ظ„ط¹ط¯ط¯ ط§ظ„ط±ظˆط¨ظ„.")
       );
       return true;
     }
@@ -199,7 +153,7 @@ async function handleTopupStarsAmountInput(bot, msg) {
     const amountRub = Number(msg.text.trim());
     if (!Number.isFinite(amountRub) || amountRub <= 0) {
       await safeTelegramCall("handleTopupStarsAmountInput.invalidAmount", () =>
-        bot.sendMessage(msg.chat.id, "❌ يجب أن يكون المبلغ أكبر من صفر.")
+        bot.sendMessage(msg.chat.id, "â‌Œ ظٹط¬ط¨ ط£ظ† ظٹظƒظˆظ† ط§ظ„ظ…ط¨ظ„ط؛ ط£ظƒط¨ط± ظ…ظ† طµظپط±.")
       );
       return true;
     }
@@ -227,7 +181,7 @@ async function handleCustomServiceRequest(bot, msg) {
       [
         "<b>Custom Service Request</b>",
         `User ID: <code>${msg.from.id}</code>`,
-        `Username: ${msg.from.username ? `@${escapeHtml(msg.from.username)}` : "غير محدد"}`,
+        `Username: ${msg.from.username ? `@${escapeHtml(msg.from.username)}` : "ط؛ظٹط± ظ…ط­ط¯ط¯"}`,
         "",
         escapeHtml(msg.text),
       ].join("\n")
@@ -236,7 +190,7 @@ async function handleCustomServiceRequest(bot, msg) {
     await safeTelegramCall("handleCustomServiceRequest.confirm", () =>
       bot.sendMessage(
         msg.chat.id,
-        "✅ تم إرسال طلبك إلى الإدارة بنجاح. يرجى الانتظار لحين مراجعة طلبك والتواصل معك."
+        "âœ… طھظ… ط¥ط±ط³ط§ظ„ ط·ظ„ط¨ظƒ ط¥ظ„ظ‰ ط§ظ„ط¥ط¯ط§ط±ط© ط¨ظ†ط¬ط§ط­. ظٹط±ط¬ظ‰ ط§ظ„ط§ظ†طھط¸ط§ط± ظ„ط­ظٹظ† ظ…ط±ط§ط¬ط¹ط© ط·ظ„ط¨ظƒ ظˆط§ظ„طھظˆط§طµظ„ ظ…ط¹ظƒ."
       )
     );
 
@@ -247,6 +201,69 @@ async function handleCustomServiceRequest(bot, msg) {
   }
 }
 
+async function handleGiftCodeInput(bot, msg, appStore) {
+  try {
+    const state = getUserState(msg.from.id);
+    if (!state || state.name !== "ACCOUNT_AWAIT_GIFT_CODE") {
+      return false;
+    }
+
+    const user = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
+    const lang = getUserLang(user);
+    const code = String(msg.text || "").trim();
+
+    if (!code) {
+      await safeTelegramCall("handleGiftCodeInput.empty", () =>
+        bot.sendMessage(msg.chat.id, lang === "ar" ? "أرسل كود الهدية بشكل صحيح." : "Please send a valid gift code.")
+      );
+      return true;
+    }
+
+    const result = appStore.redeemGiftCode(user.userId, code);
+    if (!result.ok) {
+      const reasonMapAr = {
+        USER_NOT_FOUND: "المستخدم غير موجود.",
+        INVALID_CODE: "الكود غير صالح.",
+        NOT_FOUND: "الكود غير موجود أو منتهي.",
+        ALREADY_REDEEMED: "تم استخدام هذا الكود سابقاً.",
+        EXHAUSTED: "انتهت مرات استخدام هذا الكود.",
+        INVALID_AMOUNT: "الكود غير صالح حالياً.",
+      };
+      const reasonMapEn = {
+        USER_NOT_FOUND: "User not found.",
+        INVALID_CODE: "Invalid code.",
+        NOT_FOUND: "Code not found or expired.",
+        ALREADY_REDEEMED: "This code was already redeemed.",
+        EXHAUSTED: "Code usage limit reached.",
+        INVALID_AMOUNT: "Code is invalid right now.",
+      };
+
+      await safeTelegramCall("handleGiftCodeInput.failed", () =>
+        bot.sendMessage(
+          msg.chat.id,
+          lang === "ar" ? reasonMapAr[result.reason] || "تعذر استرداد الكود." : reasonMapEn[result.reason] || "Failed to redeem code."
+        )
+      );
+      return true;
+    }
+
+    clearUserState(user.userId);
+    const updatedUser = appStore.findUserById(user.userId) || user;
+
+    await safeTelegramCall("handleGiftCodeInput.success", () =>
+      bot.sendMessage(
+        msg.chat.id,
+        lang === "ar"
+          ? `✅ تم استرداد الكود ${result.code} وإضافة ${result.amount} روبل إلى رصيدك.\n💰 رصيدك الحالي: ${formatRuble(updatedUser.balance)} RUB`
+          : `✅ Code ${result.code} redeemed successfully. ${result.amount} RUB added.\n💰 Current balance: ${formatRuble(updatedUser.balance)} RUB`
+      )
+    );
+    return true;
+  } catch (error) {
+    logBotError("handleGiftCodeInput", error, { userId: msg.from?.id });
+    return false;
+  }
+}
 async function handleAdminState(bot, msg, appStore) {
   try {
     const state = getUserState(msg.from.id);
@@ -257,7 +274,7 @@ async function handleAdminState(bot, msg, appStore) {
 
     if (msg.text.trim().toLowerCase() === "cancel") {
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.cancel", () => bot.sendMessage(msg.chat.id, "تم إلغاء العملية."));
+      await safeTelegramCall("handleAdminState.cancel", () => bot.sendMessage(msg.chat.id, "طھظ… ط¥ظ„ط؛ط§ط، ط§ظ„ط¹ظ…ظ„ظٹط©."));
       await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
       return true;
     }
@@ -267,12 +284,12 @@ async function handleAdminState(bot, msg, appStore) {
       const target = appStore.findUserById(targetUserId);
 
       if (!target) {
-        await safeTelegramCall("handleAdminState.addBalanceUserMissing", () => bot.sendMessage(msg.chat.id, "المستخدم غير موجود."));
+        await safeTelegramCall("handleAdminState.addBalanceUserMissing", () => bot.sendMessage(msg.chat.id, "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯."));
         return true;
       }
 
       setUserState(msg.from.id, "AWAITING_ADD_BALANCE_AMOUNT", { targetUserId });
-      await safeTelegramCall("handleAdminState.askAddAmount", () => bot.sendMessage(msg.chat.id, "أرسل المبلغ الآن."));
+      await safeTelegramCall("handleAdminState.askAddAmount", () => bot.sendMessage(msg.chat.id, "ط£ط±ط³ظ„ ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ط¢ظ†."));
       return true;
     }
 
@@ -280,7 +297,7 @@ async function handleAdminState(bot, msg, appStore) {
       const target = appStore.findUserById(state.targetUserId);
       const amount = Number(msg.text.trim());
       if (!target || !Number.isFinite(amount) || amount <= 0) {
-        await safeTelegramCall("handleAdminState.invalidAddAmount", () => bot.sendMessage(msg.chat.id, "بيانات غير صالحة."));
+        await safeTelegramCall("handleAdminState.invalidAddAmount", () => bot.sendMessage(msg.chat.id, "ط¨ظٹط§ظ†ط§طھ ط؛ظٹط± طµط§ظ„ط­ط©."));
         return true;
       }
 
@@ -292,15 +309,15 @@ async function handleAdminState(bot, msg, appStore) {
         amount,
       });
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.addDone", () => bot.sendMessage(msg.chat.id, "تمت إضافة الرصيد بنجاح."));
-      await safeTelegramCall("handleAdminState.addNotifyUser", () => bot.sendMessage(target.userId, `تم شحن رصيدك بـ ${formatRuble(amount)} روبل`));
+      await safeTelegramCall("handleAdminState.addDone", () => bot.sendMessage(msg.chat.id, "طھظ…طھ ط¥ط¶ط§ظپط© ط§ظ„ط±طµظٹط¯ ط¨ظ†ط¬ط§ط­."));
+      await safeTelegramCall("handleAdminState.addNotifyUser", () => bot.sendMessage(target.userId, `طھظ… ط´ط­ظ† ط±طµظٹط¯ظƒ ط¨ظ€ ${formatRuble(amount)} ط±ظˆط¨ظ„`));
       await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
       return true;
     }
 
     if (state.name === "ADMIN_AWAITING_DEDUCT_BALANCE_USER") {
       setUserState(msg.from.id, "ADMIN_AWAITING_DEDUCT_BALANCE_AMOUNT", { targetUserId: Number(msg.text.trim()) });
-      await safeTelegramCall("handleAdminState.askDeductAmount", () => bot.sendMessage(msg.chat.id, "أرسل المبلغ الآن."));
+      await safeTelegramCall("handleAdminState.askDeductAmount", () => bot.sendMessage(msg.chat.id, "ط£ط±ط³ظ„ ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ط¢ظ†."));
       return true;
     }
 
@@ -308,7 +325,7 @@ async function handleAdminState(bot, msg, appStore) {
       const target = appStore.findUserById(state.targetUserId);
       const amount = Number(msg.text.trim());
       if (!target || !Number.isFinite(amount) || amount <= 0) {
-        await safeTelegramCall("handleAdminState.invalidDeductAmount", () => bot.sendMessage(msg.chat.id, "بيانات غير صالحة."));
+        await safeTelegramCall("handleAdminState.invalidDeductAmount", () => bot.sendMessage(msg.chat.id, "ط¨ظٹط§ظ†ط§طھ ط؛ظٹط± طµط§ظ„ط­ط©."));
         return true;
       }
 
@@ -320,8 +337,8 @@ async function handleAdminState(bot, msg, appStore) {
         amount,
       });
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.deductDone", () => bot.sendMessage(msg.chat.id, "تم خصم الرصيد بنجاح."));
-      await safeTelegramCall("handleAdminState.deductNotifyUser", () => bot.sendMessage(target.userId, `تم خصم ${formatRuble(amount)} روبل من رصيدك`));
+      await safeTelegramCall("handleAdminState.deductDone", () => bot.sendMessage(msg.chat.id, "طھظ… ط®طµظ… ط§ظ„ط±طµظٹط¯ ط¨ظ†ط¬ط§ط­."));
+      await safeTelegramCall("handleAdminState.deductNotifyUser", () => bot.sendMessage(target.userId, `طھظ… ط®طµظ… ${formatRuble(amount)} ط±ظˆط¨ظ„ ظ…ظ† ط±طµظٹط¯ظƒ`));
       await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
       return true;
     }
@@ -336,7 +353,7 @@ async function handleAdminState(bot, msg, appStore) {
       }
 
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.broadcastDone", () => bot.sendMessage(msg.chat.id, `تم الإرسال إلى ${successCount} مستخدم.`));
+      await safeTelegramCall("handleAdminState.broadcastDone", () => bot.sendMessage(msg.chat.id, `طھظ… ط§ظ„ط¥ط±ط³ط§ظ„ ط¥ظ„ظ‰ ${successCount} ظ…ط³طھط®ط¯ظ….`));
       await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
       return true;
     }
@@ -344,20 +361,20 @@ async function handleAdminState(bot, msg, appStore) {
     if (state.name === "ADMIN_AWAITING_SERVICE_PRICE") {
       const amount = Number(msg.text.trim());
       if (!Number.isFinite(amount) || amount < 0) {
-        await safeTelegramCall("handleAdminState.invalidServicePrice", () => bot.sendMessage(msg.chat.id, "السعر غير صالح."));
+        await safeTelegramCall("handleAdminState.invalidServicePrice", () => bot.sendMessage(msg.chat.id, "ط§ظ„ط³ط¹ط± ط؛ظٹط± طµط§ظ„ط­."));
         return true;
       }
 
       appStore.updateServicePrice(state.serviceKey, amount);
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.servicePriceDone", () => bot.sendMessage(msg.chat.id, "تم تحديث السعر بنجاح."));
+      await safeTelegramCall("handleAdminState.servicePriceDone", () => bot.sendMessage(msg.chat.id, "طھظ… طھط­ط¯ظٹط« ط§ظ„ط³ط¹ط± ط¨ظ†ط¬ط§ط­."));
       await sendServicePricesMenu(bot, msg.chat.id, appStore.getServices());
       return true;
     }
 
     if (state.name === "ADMIN_AWAITING_UPLOAD_DATA") {
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.uploadDone", () => bot.sendMessage(msg.chat.id, "تم استلام البيانات مبدئياً. سيتم ربط JSON / Google Sheets لاحقاً."));
+      await safeTelegramCall("handleAdminState.uploadDone", () => bot.sendMessage(msg.chat.id, "طھظ… ط§ط³طھظ„ط§ظ… ط§ظ„ط¨ظٹط§ظ†ط§طھ ظ…ط¨ط¯ط¦ظٹط§ظ‹. ط³ظٹطھظ… ط±ط¨ط· JSON / Google Sheets ظ„ط§ط­ظ‚ط§ظ‹."));
       await sendAdminPanel(bot, msg.chat.id, { lang: adminLang });
       return true;
     }
@@ -401,6 +418,11 @@ async function handleTextMessage(bot, msg, appStore) {
       return;
     }
 
+    const giftCodeHandled = await handleGiftCodeInput(bot, msg, appStore);
+    if (giftCodeHandled) {
+      return;
+    }
+
     const adminHandled = await handleAdminState(bot, msg, appStore);
     if (adminHandled) {
       return;
@@ -431,3 +453,9 @@ module.exports = {
   handleTextMessage,
   exportUsersList,
 };
+
+
+
+
+
+

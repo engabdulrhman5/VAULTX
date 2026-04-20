@@ -42,12 +42,54 @@ function getAccountMenuKeyboard(lang = "ar") {
   return {
     inline_keyboard: [
       [
-        { text: t(lang, "account_btn_profile"), callback_data: "account:profile" },
-        { text: t(lang, "account_btn_history"), callback_data: "account:history" },
+        { text: lang === "ar" ? "🛒 سجل عملياتي وطلباتي" : "🛒 My Orders & History", callback_data: "account:history" },
       ],
-      [{ text: t(lang, "account_btn_vip"), callback_data: "account:vip_info" }],
+      [{ text: lang === "ar" ? "⚙️ إعدادات الإشعارات" : "⚙️ Notification Settings", callback_data: "account:notifications" }],
+      [{ text: lang === "ar" ? "🎁 استرداد كود هدية" : "🎁 Redeem Gift Code", callback_data: "account:gift_redeem" }],
       [{ text: t(lang, "common_back"), callback_data: "menu:main" }],
     ],
+  };
+}
+
+function getReferralMenuKeyboard(lang = "ar") {
+  return {
+    inline_keyboard: [
+      [{ text: lang === "ar" ? "🔗 رابط الإحالة الخاص بي" : "🔗 My Referral Link", callback_data: "referral:link" }],
+      [{ text: lang === "ar" ? "📊 إحصائيات فريقي" : "📊 Team Stats", callback_data: "referral:team_stats" }],
+      [{ text: lang === "ar" ? "💸 أرباحي من الإحالة" : "💸 Referral Earnings", callback_data: "referral:earnings" }],
+      [{ text: t(lang, "common_back"), callback_data: "menu:main" }],
+    ],
+  };
+}
+
+function getTransferMenuKeyboard(lang = "ar") {
+  return {
+    inline_keyboard: [
+      [{ text: lang === "ar" ? "💸 بدء تحويل جديد" : "💸 Start New Transfer", callback_data: "transfer:start" }],
+      [{ text: lang === "ar" ? "📜 سجل حوالاتي" : "📜 My Transfer History", callback_data: "transfer:history" }],
+      [{ text: t(lang, "common_back"), callback_data: "menu:main" }],
+    ],
+  };
+}
+
+function getTransferConfirmKeyboard(lang = "ar") {
+  return {
+    inline_keyboard: [
+      [{ text: lang === "ar" ? "✅ تأكيد وإرسال الرصيد" : "✅ Confirm & Send Balance", callback_data: "transfer:confirm" }],
+      [{ text: lang === "ar" ? "❌ إلغاء العملية" : "❌ Cancel Transfer", callback_data: "transfer:cancel" }],
+    ],
+  };
+}
+
+function getBackToAccountKeyboard(lang = "ar") {
+  return {
+    inline_keyboard: [[{ text: lang === "ar" ? "🔙 العودة لحسابي" : "🔙 Back to My Account", callback_data: "menu:account" }]],
+  };
+}
+
+function getBackToReferralKeyboard(lang = "ar") {
+  return {
+    inline_keyboard: [[{ text: lang === "ar" ? "🔙 العودة لقسم الإحالة" : "🔙 Back to Referral", callback_data: "menu:referral" }]],
   };
 }
 
@@ -120,6 +162,11 @@ module.exports = {
   getMainMenuKeyboard,
   getBackToMainMenuKeyboard,
   getAccountMenuKeyboard,
+  getBackToAccountKeyboard,
+  getReferralMenuKeyboard,
+  getBackToReferralKeyboard,
+  getTransferMenuKeyboard,
+  getTransferConfirmKeyboard,
   getSettingsMenuKeyboard,
   getChannelsKeyboard,
   getAdminPanelKeyboard,

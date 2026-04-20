@@ -1,6 +1,7 @@
 ﻿const { ADMIN_ID } = require("../config");
 const { SERVICE_KEYS } = require("../constants/menu");
 const { getArray, t, getUserLang } = require("../locales");
+const { escapeHtml } = require("../utils/formatters");
 const { sendPlaceholderReply } = require("../services/menuService");
 const {
   sendMainMenu,
@@ -9,10 +10,16 @@ const {
   sendTransactionHistory,
   sendVipInfo,
   sendReferralMenu,
+  sendReferralStats,
   sendSettingsMenu,
   sendChannelsMenu,
   sendPublicStats,
-  sendTransferInstructions,
+  sendTransferHome,
+  sendTransferPrompt,
+  sendTransferConfirm,
+  sendTransferHistory,
+  sendNotificationSettings,
+  sendGiftCodePrompt,
   sendAdminPanel,
   sendServicePricesMenu,
   sendServiceToggleMenu,
@@ -384,9 +391,61 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         await sendTransactionHistory(bot, chatId, user, appStore.getRecentTransactionsForUser(user.userId, 5), { messageId });
         return true;
 
+      case "account:notifications":
+        await sendNotificationSettings(bot, chatId, user, { messageId });
+        return true;
+
+      case "account:notify:on":
+        appStore.updateUser(user.userId, { notifyPromotions: true });
+        await sendNotificationSettings(bot, chatId, appStore.findUserById(user.userId) || user, { messageId });
+        return true;
+
+      case "account:notify:off":
+        appStore.updateUser(user.userId, { notifyPromotions: false });
+        await sendNotificationSettings(bot, chatId, appStore.findUserById(user.userId) || user, { messageId });
+        return true;
+
+      case "account:gift_redeem":
+        setUserState(user.userId, "ACCOUNT_AWAIT_GIFT_CODE");
+        await sendGiftCodePrompt(bot, chatId, user, { messageId });
+        return true;
+
       case "menu:referral":
         await sendReferralMenu(bot, chatId, user, appContext.botUsername, { messageId });
         return true;
+
+      case "referral:link":
+        await sendReferralMenu(bot, chatId, user, appContext.botUsername, { messageId });
+        return true;
+
+      case "referral:team_stats": {
+        const referrals = (appStore.getUsers() || []).filter((entry) => Number(entry.invitedBy) === Number(user.userId));
+        const activeUsers = referrals.filter((entry) => Number(entry.transactionsCount || 0) > 0).length;
+        const txs = appStore.transactions || [];
+        const totalEarnings = txs
+          .filter((tx) => Number(tx.userId) === Number(user.userId) && (tx.type === "referral_reward" || tx.type === "referral_commission"))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        await sendReferralStats(bot, chatId, user, {
+          totalInvites: referrals.length,
+          activeUsers,
+          totalEarnings: Number(totalEarnings.toFixed(2)),
+        }, { messageId });
+        return true;
+      }
+
+      case "referral:earnings": {
+        const txs = appStore.transactions || [];
+        const totalEarnings = txs
+          .filter((tx) => Number(tx.userId) === Number(user.userId) && (tx.type === "referral_reward" || tx.type === "referral_commission"))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        await sendReferralStats(bot, chatId, user, {
+          totalInvites: (appStore.getUsers() || []).filter((entry) => Number(entry.invitedBy) === Number(user.userId)).length,
+          activeUsers: (appStore.getUsers() || []).filter((entry) => Number(entry.invitedBy) === Number(user.userId) && Number(entry.transactionsCount || 0) > 0).length,
+          totalEarnings: Number(totalEarnings.toFixed(2)),
+        }, { messageId });
+        return true;
+      }
 
       case "menu:settings":
         await sendSettingsMenu(bot, chatId, { messageId, lang: getUserLang(user) });
@@ -405,9 +464,103 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         return true;
 
       case "action:transfer_balance":
-        setUserState(user.userId, "AWAITING_TRANSFER");
-        await sendTransferInstructions(bot, chatId, { messageId });
+        clearUserState(user.userId);
+        await sendTransferHome(bot, chatId, user, { messageId });
         return true;
+
+      case "transfer:start":
+        setUserState(user.userId, "AWAITING_TRANSFER_PAYLOAD");
+        await sendTransferPrompt(bot, chatId, user, { messageId });
+        return true;
+
+      case "transfer:history": {
+        const transfers = (appStore.transactions || [])
+          .filter((tx) => (tx.type === "transfer_out" || tx.type === "transfer_in")
+            && (Number(tx.userId) === Number(user.userId) || Number(tx.targetUserId) === Number(user.userId)))
+          .slice(-10)
+          .reverse();
+        await sendTransferHistory(bot, chatId, user, transfers, { messageId });
+        return true;
+      }
+
+      case "transfer:cancel":
+        clearUserState(user.userId);
+        await sendTransferHome(bot, chatId, user, { messageId });
+        return true;
+
+      case "transfer:confirm": {
+        const transferState = getUserState(user.userId);
+        if (!transferState || transferState.name !== "AWAITING_TRANSFER_CONFIRM") {
+          await safeTelegramCall("transfer.confirm.missing", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: getUserLang(user) === "ar" ? "انتهت الجلسة، ابدأ تحويلًا جديدًا." : "Session expired. Start a new transfer.",
+              show_alert: true,
+            })
+          );
+          return true;
+        }
+
+        const sender = appStore.findUserById(user.userId);
+        const receiver = appStore.findUserById(transferState.targetUserId);
+        const amount = Number(transferState.amount || 0);
+
+        if (!sender || !receiver || !Number.isFinite(amount) || amount < 10) {
+          clearUserState(user.userId);
+          await sendTransferHome(bot, chatId, user, { messageId });
+          return true;
+        }
+
+        if (Number(sender.balance || 0) < amount) {
+          await safeTelegramCall("transfer.confirm.insufficient", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: getUserLang(user) === "ar" ? "رصيدك غير كافٍ." : "Insufficient balance.",
+              show_alert: true,
+            })
+          );
+          return true;
+        }
+
+        appStore.deductBalance(sender.userId, amount);
+        appStore.addBalance(receiver.userId, amount);
+        appStore.incrementTransactions(sender.userId);
+        appStore.incrementTransactions(receiver.userId);
+        appStore.addTransaction({
+          type: "transfer_out",
+          userId: sender.userId,
+          targetUserId: receiver.userId,
+          amount,
+          status: "completed",
+        });
+        appStore.addTransaction({
+          type: "transfer_in",
+          userId: receiver.userId,
+          targetUserId: sender.userId,
+          amount,
+          status: "completed",
+        });
+
+        clearUserState(user.userId);
+
+        await safeTelegramCall("transfer.confirm.sender", () =>
+          bot.editMessageText(
+            getUserLang(user) === "ar"
+              ? `✅ تم تحويل ${amount} روبل بنجاح إلى المستخدم <code>${receiver.userId}</code>.`
+              : `✅ ${amount} RUB transferred successfully to <code>${receiver.userId}</code>.`,
+            { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }
+          )
+        );
+
+        await safeTelegramCall("transfer.confirm.receiver", () =>
+          bot.sendMessage(
+            receiver.userId,
+            getUserLang(receiver) === "ar"
+              ? `📥 تم استلام ${amount} روبل من ${escapeHtml(sender.firstName || sender.username || "User")}.`
+              : `📥 You received ${amount} RUB from ${escapeHtml(sender.firstName || sender.username || "User")}.`,
+            { parse_mode: "HTML" }
+          )
+        );
+        return true;
+      }
 
       default:
         if (query.data.startsWith("buynum_") || query.data.startsWith("buy_num_")) {

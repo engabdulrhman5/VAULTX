@@ -35,6 +35,7 @@ class AppStore {
         todayProfits: 0,
         todayDate: new Date().toISOString().slice(0, 10),
       },
+      giftCodes: {},
     };
   }
 
@@ -86,6 +87,8 @@ class AppStore {
       invitedBy: user.invitedBy || null,
       referralRewarded: Boolean(user.referralRewarded),
       referralCommissionCount: Number(user.referralCommissionCount || 0),
+      notifyPromotions: user.notifyPromotions !== false,
+      redeemedGiftCodes: Array.isArray(user.redeemedGiftCodes) ? user.redeemedGiftCodes : [],
       lastSeenAt: user.lastSeenAt || new Date().toISOString(),
       createdAt: user.createdAt || new Date().toISOString(),
     };
@@ -322,6 +325,57 @@ class AppStore {
       todayProfits: this.config.botStats.todayProfits,
       totalTransactions: this.transactions.length,
     };
+  }
+
+  redeemGiftCode(userId, rawCode) {
+    const user = this.findUserById(userId);
+    if (!user) {
+      return { ok: false, reason: "USER_NOT_FOUND" };
+    }
+
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code) {
+      return { ok: false, reason: "INVALID_CODE" };
+    }
+
+    const giftCodes = this.config.giftCodes || {};
+    const gift = giftCodes[code];
+    if (!gift || gift.active === false) {
+      return { ok: false, reason: "NOT_FOUND" };
+    }
+
+    if (Array.isArray(user.redeemedGiftCodes) && user.redeemedGiftCodes.includes(code)) {
+      return { ok: false, reason: "ALREADY_REDEEMED" };
+    }
+
+    const maxUses = Number(gift.maxUses || 0);
+    const usedBy = Array.isArray(gift.usedBy) ? gift.usedBy : [];
+    if (maxUses > 0 && usedBy.length >= maxUses) {
+      return { ok: false, reason: "EXHAUSTED" };
+    }
+
+    const amount = Number(gift.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, reason: "INVALID_AMOUNT" };
+    }
+
+    user.balance = Number((user.balance + amount).toFixed(2));
+    user.redeemedGiftCodes = [...(user.redeemedGiftCodes || []), code];
+    gift.usedBy = [...usedBy, Number(user.userId)];
+    this.config.giftCodes = {
+      ...giftCodes,
+      [code]: gift,
+    };
+
+    this.addTransaction({
+      type: "gift_code_redeem",
+      userId: user.userId,
+      amount,
+      code,
+      status: "completed",
+    });
+    this.persistAll();
+    return { ok: true, amount, code };
   }
 }
 
