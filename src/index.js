@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
 const { BOT_TOKEN, ADMIN_CHANNEL_ID } = require("./config");
@@ -25,7 +25,12 @@ const { handleTextMessage } = require("./handlers/messageHandler");
 const { handleCallbackQuery } = require("./handlers/callbackHandler");
 const { handleVirtualNumbersCallback } = require("./services/virtualNumbersFlowService");
 const { handlePreCheckoutQuery, handleSuccessfulPayment } = require("./handlers/paymentHandler");
-const { notifyTopupChannel, convertAssetAmountToRub } = require("./services/topupService");
+const {
+  notifyTopupChannel,
+  convertAssetAmountToRub,
+  verifyCryptomusWebhookSignature,
+  usdToRub,
+} = require("./services/topupService");
 const {
   setupBotCommands,
   handleMenuCommand,
@@ -150,8 +155,8 @@ async function handleCryptoWebhookEvent(event) {
     bot.sendMessage(
       userId,
       lang === "ar"
-        ? `✅ تم شحن رصيدك بنجاح عبر Crypto Pay\n💰 المبلغ: ${creditedRub} RUB`
-        : `✅ Your balance has been topped up via Crypto Pay\n💰 Amount: ${creditedRub} RUB`
+        ? `âœ… طھظ… ط´ط­ظ† ط±طµظٹط¯ظƒ ط¨ظ†ط¬ط§ط­ ط¹ط¨ط± Crypto Pay\nًں’° ط§ظ„ظ…ط¨ظ„ط؛: ${creditedRub} RUB`
+        : `âœ… Your balance has been topped up via Crypto Pay\nًں’° Amount: ${creditedRub} RUB`
     )
   );
 
@@ -167,6 +172,115 @@ async function handleCryptoWebhookEvent(event) {
         `Paid: ${paidAmountRaw} ${paidAsset}`,
         `Credited: ${creditedRub} RUB`,
       ].join("\n"),
+      { parse_mode: "HTML", disable_notification: true }
+    )
+  );
+
+  return { ok: true };
+}
+
+async function handleCryptomusWebhookEvent(rawBody, parsedPayload) {
+  const signature = parsedPayload?.__signature || "";
+  if (!verifyCryptomusWebhookSignature(rawBody, signature)) {
+    throw new Error("Invalid Cryptomus webhook signature");
+  }
+
+  const data = parsedPayload?.payload || parsedPayload?.result || parsedPayload;
+  const status = String(data?.status || "").toLowerCase();
+  if (status !== "paid" && status !== "paid_over") {
+    return { ok: true, ignored: true };
+  }
+
+  const orderId = String(data?.order_id || "");
+  const invoiceUuid = String(data?.uuid || data?.invoice_uuid || "");
+
+  if (!orderId) {
+    throw new Error("Cryptomus order_id is missing");
+  }
+
+  const duplicate = appStore.transactions.find((tx) =>
+    tx.type === "topup_cryptomus_paid"
+      && (String(tx.cryptomusOrderId || "") === orderId
+        || (invoiceUuid && String(tx.cryptomusInvoiceId || "") === invoiceUuid))
+  );
+  if (duplicate) {
+    return { ok: true, duplicate: true };
+  }
+
+  let userId = 0;
+  const pendingTx = appStore.transactions.find((tx) =>
+    tx.type === "topup_cryptomus_pending" && String(tx.cryptomusOrderId || "") === orderId
+  );
+
+  if (pendingTx?.userId) {
+    userId = Number(pendingTx.userId);
+  } else {
+    const pieces = orderId.split("_");
+    if (pieces.length >= 2) {
+      userId = Number(pieces[1]);
+    }
+  }
+
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error(`Cannot resolve user from order_id: ${orderId}`);
+  }
+
+  const amountUsd = Number(data?.amount || data?.payment_amount_usd || pendingTx?.amountUsd || 0);
+  const amountRub = Number.isFinite(amountUsd) && amountUsd > 0
+    ? usdToRub(amountUsd)
+    : Number(pendingTx?.amount || 0);
+
+  if (!Number.isFinite(amountRub) || amountRub <= 0) {
+    throw new Error(`Invalid converted amount from Cryptomus webhook for order ${orderId}`);
+  }
+
+  appStore.addBalance(userId, amountRub);
+  appStore.addDeposit(userId, amountRub);
+  const updatedUser = appStore.incrementTransactions(userId);
+
+  appStore.addTransaction({
+    type: "topup_cryptomus_paid",
+    userId,
+    amount: amountRub,
+    amountUsd: amountUsd > 0 ? amountUsd : undefined,
+    method: "Cryptomus Hosted Checkout",
+    cryptomusOrderId: orderId,
+    cryptomusInvoiceId: invoiceUuid || undefined,
+    serviceKey: "balance_topup",
+    externalPayload: rawBody,
+  });
+
+  if (pendingTx?.id) {
+    appStore.updateTransactionById(pendingTx.id, {
+      status: "paid",
+      paidAt: new Date().toISOString(),
+      paidUsd: amountUsd > 0 ? amountUsd : undefined,
+      paidRub: amountRub,
+    });
+  }
+
+  const lang = getUserLang(updatedUser || appStore.findUserById(userId) || { language: "ar" });
+  await safeTelegramCall("cryptomusWebhook.notifyUser", () =>
+    bot.sendMessage(
+      userId,
+      lang === "ar"
+        ? `✅ تم شحن رصيدك بنجاح عبر Cryptomus\n💰 المبلغ: ${amountRub} RUB`
+        : `✅ Your balance has been topped up via Cryptomus\n💰 Amount: ${amountRub} RUB`
+    )
+  );
+
+  await notifyTopupChannel(bot, userId, amountRub, lang, "Cryptomus Hosted Checkout");
+
+  await safeTelegramCall("cryptomusWebhook.notifyAdmin", () =>
+    bot.sendMessage(
+      ADMIN_CHANNEL_ID,
+      [
+        "<b>Cryptomus Top-up Success</b>",
+        `User ID: <code>${userId}</code>`,
+        `Order ID: <code>${orderId}</code>`,
+        amountUsd > 0 ? `Amount: ${amountUsd} USD` : null,
+        `Credited: ${amountRub} RUB`,
+      ].filter(Boolean).join("\n"),
       { parse_mode: "HTML", disable_notification: true }
     )
   );
@@ -204,6 +318,32 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             logBotError("http.crypto_webhook", error, { body });
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: "invalid webhook payload" }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/cryptomus-webhook") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > 2 * 1024 * 1024) {
+            req.destroy();
+          }
+        });
+
+        req.on("end", async () => {
+          try {
+            const parsed = body ? JSON.parse(body) : {};
+            const signature = req.headers?.sign || req.headers?.Sign || req.headers?.SIGN || "";
+            const payloadWithSignature = { ...parsed, __signature: String(signature || "") };
+            const result = await handleCryptomusWebhookEvent(body || "{}", payloadWithSignature);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          } catch (error) {
+            logBotError("http.cryptomus_webhook", error, { body });
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "invalid cryptomus webhook payload" }));
           }
         });
         return;
@@ -247,8 +387,8 @@ function getExpiryDateTime(value, minutes = 20) {
 
 function buildAppDisplayName(lang, serviceCode) {
   const appMap = {
-    wa: lang === "ar" ? "واتساب" : "WhatsApp",
-    tg: lang === "ar" ? "تيليجرام" : "Telegram",
+    wa: lang === "ar" ? "ظˆط§طھط³ط§ط¨" : "WhatsApp",
+    tg: lang === "ar" ? "طھظٹظ„ظٹط¬ط±ط§ظ…" : "Telegram",
   };
   return appMap[serviceCode] || serviceCode;
 }
@@ -259,25 +399,25 @@ function buildProviderDisplayName(providerKey) {
 
 function buildOrderReceipt(lang, { activationId, number, countryLabel, appDisplayName, providerName, finalPriceRub, createdAt, codeLabel }) {
   const lines = [
-    `➖ ${t(lang, "virtualNumbers_receipt_activation")} : ${activationId} 🛎`,
-    `➖ ${t(lang, "virtualNumbers_receipt_country")} : ${countryLabel} •`,
-    `➖ ${t(lang, "virtualNumbers_receipt_number")} : <code>+${number}</code> ☎️•`,
-    `➖ ${t(lang, "virtualNumbers_receipt_code")} : ${codeLabel}`,
-    `➖ ${t(lang, "virtualNumbers_receipt_status")} : ${t(lang, "virtualNumbers_receipt_code_pending")} 🔎 •`,
-    `➖ ${t(lang, "virtualNumbers_receipt_app")} : ${appDisplayName}`,
-    `➖ ${t(lang, "virtualNumbers_receipt_provider")} : ${providerName} 🧭 •`,
-    `➖ ${t(lang, "virtualNumbers_receipt_price")} : ₽ ${finalPriceRub} 🏷 •`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_activation")} : ${activationId} ًں›ژ`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_country")} : ${countryLabel} â€¢`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_number")} : <code>+${number}</code> âکژï¸ڈâ€¢`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_code")} : ${codeLabel}`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_status")} : ${t(lang, "virtualNumbers_receipt_code_pending")} ًں”ژ â€¢`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_app")} : ${appDisplayName}`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_provider")} : ${providerName} ًں§­ â€¢`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_price")} : â‚½ ${finalPriceRub} ًںڈ· â€¢`,
     "",
-    `➖ ${t(lang, "virtualNumbers_receipt_created")} : ${formatActivationDateTime(createdAt)}   📭•`,
-    `➖ ${t(lang, "virtualNumbers_receipt_expires")} : ${getExpiryDateTime(createdAt)}  📫•`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_created")} : ${formatActivationDateTime(createdAt)}   ًں“­â€¢`,
+    `â‍– ${t(lang, "virtualNumbers_receipt_expires")} : ${getExpiryDateTime(createdAt)}  ًں“«â€¢`,
   ];
   return lines.join("\n");
 }
 
 function buildSmsReceivedText(lang, { number, code, password = t(lang, "virtualNumbers_sms_received_password") }) {
-  return [`✅ ${t(lang, "virtualNumbers_sms_received_number")} : <code>+${number}</code>`,
-    `💬 ${t(lang, "virtualNumbers_sms_received_code")} : <code>${code}</code>`,
-    `🔐 ${t(lang, "virtualNumbers_sms_received_password")} : <code>${password}</code>`,
+  return [`âœ… ${t(lang, "virtualNumbers_sms_received_number")} : <code>+${number}</code>`,
+    `ًں’¬ ${t(lang, "virtualNumbers_sms_received_code")} : <code>${code}</code>`,
+    `ًں”گ ${t(lang, "virtualNumbers_sms_received_password")} : <code>${password}</code>`,
     "",
     t(lang, "virtualNumbers_copy_prompt"),
   ].join("\n");
@@ -387,7 +527,7 @@ bot.on("callback_query", async (query) => {
 
         const countryData = grizzlyCountries[country.countryId];
         const countryName = lang === "ar" ? countryData.name_ar : t(lang, `grizzly_country_${country.countryId}`) || countryData.name_ar;
-        const buttonText = `₽${finalPriceRub} : ${countryData.flag} ${countryName} 🚀`;
+        const buttonText = `â‚½${finalPriceRub} : ${countryData.flag} ${countryName} ًںڑ€`;
         const callbackData = `buy_num_wa_${country.countryId}_${finalPriceRub}`;
 
         currentRow.push({ text: buttonText, callback_data: callbackData });
@@ -476,7 +616,7 @@ bot.on("callback_query", async (query) => {
 
       const [, activationId, number] = String(result).split(":");
       appStore.deductBalance(currentUser.userId, price);
-      const countryMeta = grizzlyCountries[countryId] || { name_ar: "دولة أخرى", flag: "🌍" };
+      const countryMeta = grizzlyCountries[countryId] || { name_ar: "ط¯ظˆظ„ط© ط£ط®ط±ظ‰", flag: "ًںŒچ" };
       const countryLabel = countryId === "random"
         ? t(lang, "virtualNumbers_country_random")
         : `${lang === "ar" ? countryMeta.name_ar : t(lang, `grizzly_country_${countryId}`) || countryMeta.name_ar} ${countryMeta.flag}`;
@@ -559,7 +699,7 @@ bot.on("callback_query", async (query) => {
 
       const [, newActivationId, number] = String(result).split(":");
       appStore.deductBalance(currentUser.userId, price);
-      const countryMeta = grizzlyCountries[countryId] || { name_ar: "دولة أخرى", flag: "🌍" };
+      const countryMeta = grizzlyCountries[countryId] || { name_ar: "ط¯ظˆظ„ط© ط£ط®ط±ظ‰", flag: "ًںŒچ" };
       const purchaseTx = appStore.addTransaction({
         type: "virtual_number_purchase",
         userId: currentUser.userId,
@@ -681,7 +821,7 @@ bot.on("callback_query", async (query) => {
     logBotError("bot.on.callback_query", error, { userId: query.from?.id, data: query.data });
     await safeTelegramCall("bot.on.callback_query.alert", () =>
       bot.answerCallbackQuery(query.id, {
-        text: "حدث خطأ أثناء تنفيذ الطلب.",
+        text: "ط­ط¯ط« ط®ط·ط£ ط£ط«ظ†ط§ط، طھظ†ظپظٹط° ط§ظ„ط·ظ„ط¨.",
         show_alert: true,
       })
     );
@@ -727,7 +867,7 @@ bot.on("message", async (msg) => {
   } catch (error) {
     logBotError("bot.on.message", error, { userId: msg.from?.id });
     await safeTelegramCall("bot.on.message.reply", () =>
-      bot.sendMessage(msg.chat.id, "حدث خطأ أثناء معالجة الطلب.")
+      bot.sendMessage(msg.chat.id, "ط­ط¯ط« ط®ط·ط£ ط£ط«ظ†ط§ط، ظ…ط¹ط§ظ„ط¬ط© ط§ظ„ط·ظ„ط¨.")
     );
   }
 });
@@ -777,4 +917,5 @@ async function bootstrap() {
 
 bootstrap();
 
-console.log("🤖 VaultX Bot is running and Grizzly cache is loaded...");
+console.log("ًں¤– VaultX Bot is running and Grizzly cache is loaded...");
+

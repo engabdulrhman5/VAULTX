@@ -1,4 +1,4 @@
-const { t } = require("../locales");
+﻿const { t } = require("../locales");
 
 function getTopupHomeKeyboard(lang = "ar") {
   return {
@@ -14,6 +14,12 @@ function getTopupHomeKeyboard(lang = "ar") {
       [
         { text: "💸 Binance Pay", callback_data: "topup:auto:binance" },
         { text: lang === "ar" ? "⭐ نجوم تليجرام" : "⭐ Telegram Stars", callback_data: "topup:auto:stars" },
+      ],
+      [
+        {
+          text: lang === "ar" ? "💎 الدفع مقابل العملات الرقمية" : "💎 Pay With Crypto",
+          callback_data: "topup:auto:cryptomus",
+        },
       ],
       [
         { text: "📱 Vodafone Cash", callback_data: "topup:auto:vodafone" },

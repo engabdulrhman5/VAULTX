@@ -1,5 +1,12 @@
-const { ACTIVATIONS_CHANNEL_ID } = require("../config");
+﻿const crypto = require("crypto");
 const axios = require("axios");
+const {
+  ACTIVATIONS_CHANNEL_ID,
+  CRYPTO_PAY_TOKEN,
+  CRYPTOMUS_MERCHANT_ID,
+  CRYPTOMUS_API_KEY,
+  USD_TO_RUB_RATE,
+} = require("../config");
 const {
   getTopupHomeKeyboard,
   getSaudiTopupKeyboard,
@@ -12,8 +19,6 @@ const { sendOrEditMessage } = require("./profileService");
 const { safeTelegramCall } = require("./telegramSafe");
 const { formatRuble } = require("../utils/formatters");
 const { t } = require("../locales");
-const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
-const { CRYPTO_PAY_TOKEN } = require("../config");
 
 const CRYPTO_PAY_BASE_URL = "https://pay.crypt.bot/api";
 const CRYPTO_SUPPORTED_ASSETS = ["USDT", "TON", "TRX", "BTC", "ETH"];
@@ -24,6 +29,16 @@ const CRYPTO_ASSET_PRECISION = {
   BTC: 8,
   ETH: 8,
 };
+
+const CRYPTOMUS_API_BASE = "https://api.cryptomus.com";
+
+function rubToUsd(amountRub) {
+  return Number((Number(amountRub || 0) / Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+}
+
+function usdToRub(amountUsd) {
+  return Number((Number(amountUsd || 0) * Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+}
 
 function buildCryptoAssetKeyboard(lang = "ar") {
   return {
@@ -51,6 +66,15 @@ function buildCryptoInvoiceKeyboard(payUrl, lang = "ar") {
   };
 }
 
+function buildCryptomusPayKeyboard(payUrl, lang = "ar") {
+  return {
+    inline_keyboard: [
+      [{ text: lang === "ar" ? "🔗 اضغط هنا للانتقال لصفحة الدفع" : "🔗 Pay Now", url: payUrl }],
+      [{ text: lang === "ar" ? "↩️ رجوع" : "↩️ Back", callback_data: "service:balance_topup" }],
+    ],
+  };
+}
+
 function roundNumber(value, digits = 2) {
   const factor = Math.pow(10, digits);
   return Math.ceil(Number(value) * factor) / factor;
@@ -70,7 +94,8 @@ async function callCryptoPayApi(method, payload = {}) {
   });
 
   if (!response?.data?.ok) {
-    throw new Error(`Crypto Pay API error: ${response?.data?.error?.name || "unknown_error"}`);
+    const errName = response?.data?.error?.name || "unknown_error";
+    throw new Error(`Crypto Pay API error: ${errName}`);
   }
 
   return response.data.result;
@@ -86,38 +111,26 @@ function findDirectRate(rates, source, target) {
 
 function resolveAssetToRubRate(rates, asset) {
   const directAssetRub = findDirectRate(rates, asset, "RUB");
-  if (directAssetRub) {
-    return directAssetRub;
-  }
+  if (directAssetRub) return directAssetRub;
 
   const directRubAsset = findDirectRate(rates, "RUB", asset);
-  if (directRubAsset) {
-    return 1 / directRubAsset;
-  }
+  if (directRubAsset) return 1 / directRubAsset;
 
   const assetUsdt = findDirectRate(rates, asset, "USDT");
   const usdtRub = findDirectRate(rates, "USDT", "RUB");
-  if (assetUsdt && usdtRub) {
-    return assetUsdt * usdtRub;
-  }
+  if (assetUsdt && usdtRub) return assetUsdt * usdtRub;
 
   const assetUsd = findDirectRate(rates, asset, "USD");
   const usdRub = findDirectRate(rates, "USD", "RUB");
-  if (assetUsd && usdRub) {
-    return assetUsd * usdRub;
-  }
+  if (assetUsd && usdRub) return assetUsd * usdRub;
 
   return null;
 }
 
 async function fetchCryptoExchangeRates() {
   const result = await callCryptoPayApi("getExchangeRates", {});
-  if (Array.isArray(result)) {
-    return result;
-  }
-  if (Array.isArray(result?.rates)) {
-    return result.rates;
-  }
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.rates)) return result.rates;
   return [];
 }
 
@@ -142,10 +155,95 @@ async function convertAssetAmountToRub(amountAsset, asset) {
   return roundNumber(Number(amountAsset) * assetToRub, 2);
 }
 
+function cryptomusSignFromBodyString(rawBody, apiKey) {
+  return crypto
+    .createHash("md5")
+    .update(Buffer.from(rawBody, "utf8").toString("base64") + String(apiKey || ""))
+    .digest("hex");
+}
+
+async function createCryptomusPayment(amountUsd, userId) {
+  if (!CRYPTOMUS_MERCHANT_ID || !CRYPTOMUS_API_KEY) {
+    throw new Error("Cryptomus credentials are missing");
+  }
+
+  const normalizedUsd = Number(Number(amountUsd).toFixed(2));
+  if (!Number.isFinite(normalizedUsd) || normalizedUsd <= 0) {
+    throw new Error("Invalid USD amount");
+  }
+
+  const orderId = `vxcm_${Number(userId)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const bodyObj = {
+    amount: String(normalizedUsd),
+    currency: "USD",
+    order_id: orderId,
+  };
+  const rawBody = JSON.stringify(bodyObj);
+  const sign = cryptomusSignFromBodyString(rawBody, CRYPTOMUS_API_KEY);
+
+  const response = await axios.post(`${CRYPTOMUS_API_BASE}/v1/payment`, bodyObj, {
+    headers: {
+      merchant: CRYPTOMUS_MERCHANT_ID,
+      sign,
+      "Content-Type": "application/json",
+    },
+    timeout: 20000,
+  });
+
+  if (!response?.data || response.data.state === 1) {
+    throw new Error(`Cryptomus API error: ${response?.data?.message || "unknown_error"}`);
+  }
+
+  const result = response.data.result || response.data;
+  const payUrl = result?.url || result?.payment_url;
+  if (!payUrl) {
+    throw new Error("Cryptomus payment URL is missing");
+  }
+
+  return {
+    orderId,
+    amountUsd: normalizedUsd,
+    payUrl,
+    invoiceId: String(result?.uuid || result?.invoice_uuid || ""),
+    rawResult: result,
+  };
+}
+
+function verifyCryptomusWebhookSignature(rawBody, signatureHeader) {
+  if (!CRYPTOMUS_API_KEY) return false;
+  if (!signatureHeader) return false;
+  const expected = cryptomusSignFromBodyString(rawBody, CRYPTOMUS_API_KEY);
+  return String(expected).toLowerCase() === String(signatureHeader).toLowerCase();
+}
+
 async function sendTopupHome(bot, chatId, options = {}) {
   const lang = options.lang || "ar";
-  const balance = Number(options.user?.balance || 0);
-  const text = buildVaultxServiceCard(lang, "balance_topup", { balance: formatRuble(balance) });
+  const balanceRub = Number(options.user?.balance || 0);
+  const balanceUsd = rubToUsd(balanceRub);
+  const text = lang === "ar"
+    ? [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ الـمـحـفـظـــة والـرصـيـــد ❩ ♦️",
+      `💵 رصيد المستخدم بالدولار: ${balanceUsd.toFixed(2)}$`,
+      `💰 رصيد المستخدم بالروبل: ${formatRuble(balanceRub)}₽`,
+      "💡 يمكنك شحن حسابك عبر بوابات الدفع الآمنة.",
+      "💡 الرصيد لا يمتلك تاريخ صلاحية وسيبقى محفوظاً.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ يرجى اختيار طريقة الدفع لإيداع الرصيد ⬇️",
+    ].join("\n")
+    : [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ W A L L E T   &   B A L A N C E ❩ ♦️",
+      `💵 User USD balance: ${balanceUsd.toFixed(2)}$`,
+      `💰 User RUB balance: ${formatRuble(balanceRub)}₽`,
+      "💡 Top up your account via secure payment gateways.",
+      "💡 Balance does not expire and stays in your wallet.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ Please choose a payment method to deposit ⬇️",
+    ].join("\n");
+
   return sendOrEditMessage(bot, chatId, text, getTopupHomeKeyboard(lang), options.messageId, "sendTopupHome");
 }
 
@@ -241,6 +339,75 @@ async function sendCryptoInvoiceCheckout(bot, chatId, data, options = {}) {
   );
 }
 
+async function sendCryptomusUsdPrompt(bot, chatId, options = {}) {
+  const lang = options.lang || "ar";
+  const text = lang === "ar"
+    ? [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ تـحـديـــد مـبـلـــغ الإيـــداع ❩ ♦️",
+      "💡 الدفع يتم عبر بوابة Cryptomus العالمية والآمنة.",
+      "💡 يمكنك الدفع بأي عملة رقمية (USDT, TRX, BTC...).",
+      "💡 سيتم تحويل القيمة تلقائياً إلى رصيد في حسابك.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ يرجى إرسال المبلغ بالدولار ($) في رسالة الآن ⬇️",
+    ].join("\n")
+    : [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ D E P O S I T   A M O U N T ❩ ♦️",
+      "💡 Payment is processed via secure Cryptomus gateway.",
+      "💡 You can pay with any crypto coin and network.",
+      "💡 Value will be converted to your wallet balance automatically.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⬇️ Please send the amount in USD ($) now ⬇️",
+    ].join("\n");
+
+  return sendOrEditMessage(
+    bot,
+    chatId,
+    text,
+    { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:balance_topup" }]] },
+    options.messageId,
+    "sendCryptomusUsdPrompt"
+  );
+}
+
+async function sendCryptomusInvoiceCard(bot, chatId, payload, options = {}) {
+  const lang = options.lang || "ar";
+  const text = lang === "ar"
+    ? [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ فـاتـــورة الإيـــداع (الـكـريـبـتـو) ❩ ♦️",
+      `💰 المبلغ المطلوب: ${payload.amountUsd.toFixed(2)}$`,
+      "🔗 بوابة الدفع: Cryptomus (آمن وموثق)",
+      "⏳ صلاحية الفاتورة: ساعة واحدة من الآن.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⚠️ الرصيد سيصل حسابك تلقائياً فور تأكيد شبكة البلوكتشين.",
+      "⬇️ اضغط على الزر أدناه للانتقال لصفحة الدفع ⬇️",
+    ].join("\n")
+    : [
+      "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
+      "━━━━━━━━━━━━━━━━━━━",
+      "♦️ ❨ C R Y P T O   D E P O S I T   I N V O I C E ❩ ♦️",
+      `💰 Required amount: ${payload.amountUsd.toFixed(2)}$`,
+      "🔗 Gateway: Cryptomus (Secure & Verified)",
+      "⏳ Invoice validity: 1 hour.",
+      "━━━━━━━━━━━━━━━━━━━",
+      "⚠️ Balance will be added automatically after blockchain confirmation.",
+      "⬇️ Tap the button below to open the payment page ⬇️",
+    ].join("\n");
+
+  return safeTelegramCall("sendCryptomusInvoiceCard", () =>
+    bot.sendMessage(chatId, text, {
+      parse_mode: "HTML",
+      reply_markup: buildCryptomusPayKeyboard(payload.payUrl, lang),
+      disable_web_page_preview: true,
+    })
+  );
+}
+
 async function createCryptoInvoiceForRub(userId, amountRub, asset) {
   const normalizedAsset = String(asset || "").toUpperCase();
   if (!CRYPTO_SUPPORTED_ASSETS.includes(normalizedAsset)) {
@@ -264,9 +431,14 @@ async function createCryptoInvoiceForRub(userId, amountRub, asset) {
     payload,
   });
 
+  const payUrl = invoice.bot_invoice_url || invoice.pay_url || invoice.mini_app_invoice_url || invoice.url || "";
+  if (!payUrl) {
+    throw new Error("Crypto Pay did not return a payment URL");
+  }
+
   return {
     invoiceId: Number(invoice.invoice_id),
-    payUrl: invoice.bot_invoice_url || invoice.pay_url || invoice.mini_app_invoice_url,
+    payUrl,
     amountAsset,
     amountRub: Number(amountRub),
     asset: normalizedAsset,
@@ -348,16 +520,23 @@ async function notifyTopupChannel(bot, userId, amountRub, lang = "ar", method = 
 
 module.exports = {
   CRYPTO_SUPPORTED_ASSETS,
+  CRYPTOMUS_API_BASE,
   sendTopupHome,
   sendCountryTopupMenu,
   sendStarsPrompt,
   sendCryptoAssetPrompt,
   sendCryptoAmountPrompt,
+  sendCryptomusUsdPrompt,
+  sendCryptomusInvoiceCard,
   sendCryptoInvoiceCheckout,
   sendStarsCheckout,
   sendPlaceholderTopupMethod,
   createStarsInvoice,
   createCryptoInvoiceForRub,
+  createCryptomusPayment,
+  verifyCryptomusWebhookSignature,
   convertAssetAmountToRub,
+  rubToUsd,
+  usdToRub,
   notifyTopupChannel,
 };

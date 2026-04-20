@@ -30,6 +30,7 @@ const {
   sendStarsPrompt,
   sendCryptoAssetPrompt,
   sendCryptoAmountPrompt,
+  sendCryptomusUsdPrompt,
   sendPlaceholderTopupMethod,
   createStarsInvoice,
 } = require("../services/topupService");
@@ -1139,6 +1140,12 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
         if (query.data === "topup:auto:crypto") {
           clearUserState(user.userId);
           await sendCryptoAssetPrompt(bot, chatId, { messageId, lang: getUserLang(user) });
+          return true;
+        }
+
+        if (query.data === "topup:auto:cryptomus") {
+          setUserState(user.userId, "AWAITING_TOPUP_CRYPTOMUS_USD");
+          await sendCryptomusUsdPrompt(bot, chatId, { messageId, lang: getUserLang(user) });
           return true;
         }
 

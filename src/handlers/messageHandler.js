@@ -10,7 +10,14 @@ const {
   sendServicePricesMenu,
   sendServiceToggleMenu,
 } = require("../services/profileService");
-const { sendStarsCheckout, createCryptoInvoiceForRub, sendCryptoInvoiceCheckout } = require("../services/topupService");
+const {
+  sendStarsCheckout,
+  createCryptoInvoiceForRub,
+  sendCryptoInvoiceCheckout,
+  createCryptomusPayment,
+  sendCryptomusInvoiceCard,
+  usdToRub,
+} = require("../services/topupService");
 const { safeTelegramCall } = require("../services/telegramSafe");
 const { logBotError } = require("../services/errorLogger");
 const { formatRuble, escapeHtml, getDisplayName } = require("../utils/formatters");
@@ -132,7 +139,11 @@ async function handleTransferInput(bot, msg, appStore) {
 async function handleTopupAmountInput(bot, msg, appStore) {
   try {
     const state = getUserState(msg.from.id);
-    if (!state || (state.name !== "AWAITING_TOPUP_STARS_AMOUNT" && state.name !== "AWAITING_TOPUP_CRYPTO_AMOUNT")) {
+    if (!state || (
+      state.name !== "AWAITING_TOPUP_STARS_AMOUNT"
+      && state.name !== "AWAITING_TOPUP_CRYPTO_AMOUNT"
+      && state.name !== "AWAITING_TOPUP_CRYPTOMUS_USD"
+    )) {
       return false;
     }
     const user = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
@@ -153,8 +164,8 @@ async function handleTopupAmountInput(bot, msg, appStore) {
       return true;
     }
 
-    const amountRub = Number(msg.text.trim());
-    if (!Number.isFinite(amountRub) || amountRub <= 0) {
+    const enteredAmount = Number(msg.text.trim());
+    if (!Number.isFinite(enteredAmount) || enteredAmount <= 0) {
       await safeTelegramCall("handleTopupAmountInput.invalidAmount", () =>
         bot.sendMessage(msg.chat.id, lang === "ar" ? "❌ يجب أن يكون المبلغ أكبر من صفر." : "❌ Amount must be greater than zero.")
       );
@@ -163,7 +174,31 @@ async function handleTopupAmountInput(bot, msg, appStore) {
 
     if (state.name === "AWAITING_TOPUP_STARS_AMOUNT") {
       clearUserState(msg.from.id);
-      await sendStarsCheckout(bot, msg.chat.id, amountRub, lang);
+      await sendStarsCheckout(bot, msg.chat.id, enteredAmount, lang);
+      return true;
+    }
+
+    if (state.name === "AWAITING_TOPUP_CRYPTOMUS_USD") {
+      const amountUsd = Number(enteredAmount.toFixed(2));
+      const invoice = await createCryptomusPayment(amountUsd, msg.from.id);
+      clearUserState(msg.from.id);
+
+      appStore.addTransaction({
+        type: "topup_cryptomus_pending",
+        userId: msg.from.id,
+        amountUsd,
+        amount: usdToRub(amountUsd),
+        cryptomusOrderId: invoice.orderId,
+        cryptomusInvoiceId: invoice.invoiceId,
+        method: "Cryptomus Hosted Checkout",
+        serviceKey: "balance_topup",
+        status: "pending",
+      });
+
+      await sendCryptomusInvoiceCard(bot, msg.chat.id, {
+        amountUsd,
+        payUrl: invoice.payUrl,
+      }, { lang });
       return true;
     }
 
@@ -176,6 +211,7 @@ async function handleTopupAmountInput(bot, msg, appStore) {
       return true;
     }
 
+    const amountRub = Number(enteredAmount.toFixed(2));
     const invoice = await createCryptoInvoiceForRub(msg.from.id, amountRub, asset);
     clearUserState(msg.from.id);
 
@@ -204,8 +240,14 @@ async function handleTopupAmountInput(bot, msg, appStore) {
     logBotError("handleTopupAmountInput", error, { userId: msg.from?.id });
     const user = appStore.findUserById(msg.from.id) || appStore.getOrCreateUser(msg.from);
     const lang = getUserLang(user);
+    const reason = String(error?.message || "");
     await safeTelegramCall("handleTopupAmountInput.replyError", () =>
-      bot.sendMessage(msg.chat.id, lang === "ar" ? "تعذر إنشاء الفاتورة حالياً." : "Unable to create invoice right now.")
+      bot.sendMessage(
+        msg.chat.id,
+        lang === "ar"
+          ? `تعذر إنشاء الفاتورة حالياً.${reason ? `\nسبب تقني: ${reason}` : ""}`
+          : `Unable to create invoice right now.${reason ? `\nTechnical reason: ${reason}` : ""}`
+      )
     );
     return false;
   }
