@@ -5,11 +5,15 @@ const { safeTelegramCall } = require("./telegramSafe");
 const { PUBLIC_BASE_URL, TELEGRAM_WEBAPP_URL } = require("../config");
 
 function resolveWebAppUrl(lang = "ar") {
+  const version = String(process.env.WEBAPP_VERSION || "2026-04-28-2");
   const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
-  if (explicit) return explicit;
+  if (explicit) {
+    const hasQuery = explicit.includes("?");
+    return `${explicit}${hasQuery ? "&" : "?"}v=${encodeURIComponent(version)}`;
+  }
   const base = String(PUBLIC_BASE_URL || "").trim();
   if (!base) return "";
-  return `${base.replace(/\/+$/, "")}/webapp/app?lang=${lang === "en" ? "en" : "ar"}`;
+  return `${base.replace(/\/+$/, "")}/webapp/app?lang=${lang === "en" ? "en" : "ar"}&v=${encodeURIComponent(version)}`;
 }
 
 async function setupBotCommands(bot) {

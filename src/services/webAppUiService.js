@@ -108,7 +108,12 @@ function renderVaultXWebAppPage(req, res, appStore) {
     .replace(/__DIR__/g, lang === "ar" ? "rtl" : "ltr")
     .replace("__BOOTSTRAP_JSON__", safeJson(bootstrap));
 
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+  });
   res.end(html);
 }
 

@@ -468,6 +468,7 @@ async function sendGatewayWebAppLauncher(bot, chatId, methodKey, options = {}) {
     lang,
     user_id: userId,
     screen: "payment",
+    v: String(process.env.WEBAPP_VERSION || "2026-04-28-2"),
   });
   if (!webAppUrl) {
     throw new Error("PUBLIC_BASE_URL is missing for WebApp launch");
