@@ -43,6 +43,17 @@
       virtual_visa: isAr ? "فيزا افتراضية" : "Virtual Visa",
       other_services: isAr ? "خدمات أخرى" : "Other Services",
       payments: isAr ? "شحن الحساب" : "Top Up",
+      socialPlatform: isAr ? "اختر المنصة" : "Select Platform",
+      socialCategory: isAr ? "اختر نوع الخدمة" : "Select Category",
+      socialService: isAr ? "اختر الجودة والسعر" : "Select Service",
+      accountLink: isAr ? "رابط الحساب" : "Account Link",
+      quantity: isAr ? "الكمية" : "Quantity",
+      placeOrder: isAr ? "تنفيذ الطلب" : "Place Order",
+      gameCategory: isAr ? "اختر القسم" : "Select Category",
+      gameSelect: isAr ? "اختر اللعبة" : "Select Game",
+      packageSelect: isAr ? "اختر الباقة" : "Select Package",
+      playerId: isAr ? "ايدي اللعبة" : "Game ID",
+      customAmount: isAr ? "كمية مخصصة" : "Custom amount",
       chooseApp: isAr ? "اختر التطبيق" : "Choose app", chooseCountry: isAr ? "اختر الدولة" : "Choose country",
       choosePrice: isAr ? "اختر السعر والسيرفر" : "Choose price and server", buyOk: isAr ? "تم شراء الرقم" : "Number purchased",
       reqCode: isAr ? "طلب الكود" : "Request Code", noOps: isAr ? "لا توجد عمليات" : "No operations",
@@ -56,7 +67,9 @@
       view: BOOT.initialScreen === "payment" ? "payments" : "dashboard",
       user: { ...BOOT.user }, selectedMethod: BOOT.initialMethod || (BOOT.methods[0]?.key || "binance"),
       operations: [], referralStats: { totalInvites:0, activeUsers:0, totalEarnings:0 },
-      vn: { apps: [], app: "", countries: [], selectedCountry: null, order: null }
+      vn: { apps: [], app: "", countries: [], selectedCountry: null, order: null },
+      smm: { platforms: [], platform: "", categories: [], category: "", services: [], service: null },
+      game: { categories: [], category: "", games: [], game: "", packages: [], custom: null }
     };
 
     const bigServices = [
@@ -83,6 +96,12 @@
     async function loadReferral(){ try{ const r=await fetch(`/webapp/referral-stats?user_id=${uid()}`,{cache:"no-store"}); const d=await r.json(); state.referralStats=d?.stats||state.referralStats; }catch(_){} }
     async function loadVnApps(){ try{ const r=await fetch('/webapp/virtual-numbers/apps',{cache:'no-store'}); const d=await r.json(); state.vn.apps=Array.isArray(d?.apps)?d.apps:[]; }catch(_){ state.vn.apps=[]; } }
     async function loadVnCountries(app){ try{ const r=await fetch('/webapp/virtual-numbers/countries?app='+encodeURIComponent(app),{cache:'no-store'}); const d=await r.json(); state.vn.countries=Array.isArray(d?.countries)?d.countries:[]; state.vn.selectedCountry=null; }catch(_){ state.vn.countries=[]; } }
+    async function loadSmmPlatforms(){ try{ const r=await fetch('/webapp/social-boost/platforms?lang='+(isAr?'ar':'en'),{cache:'no-store'}); const d=await r.json(); state.smm.platforms=Array.isArray(d?.platforms)?d.platforms:[]; if(!state.smm.platform&&state.smm.platforms[0]) state.smm.platform=state.smm.platforms[0].key; }catch(_){ state.smm.platforms=[]; } }
+    async function loadSmmCategories(platform){ try{ const r=await fetch('/webapp/social-boost/categories?lang='+(isAr?'ar':'en')+'&platform='+encodeURIComponent(platform),{cache:'no-store'}); const d=await r.json(); state.smm.categories=Array.isArray(d?.categories)?d.categories:[]; state.smm.category=''; state.smm.services=[]; state.smm.service=null; }catch(_){ state.smm.categories=[]; } }
+    async function loadSmmServices(platform,category){ try{ const r=await fetch('/webapp/social-boost/services?lang='+(isAr?'ar':'en')+'&platform='+encodeURIComponent(platform)+'&category='+encodeURIComponent(category),{cache:'no-store'}); const d=await r.json(); state.smm.services=Array.isArray(d?.services)?d.services:[]; state.smm.service=null; }catch(_){ state.smm.services=[]; } }
+    async function loadGameCategories(){ try{ const r=await fetch('/webapp/game-topup/categories?lang='+(isAr?'ar':'en'),{cache:'no-store'}); const d=await r.json(); state.game.categories=Array.isArray(d?.categories)?d.categories:[]; }catch(_){ state.game.categories=[]; } }
+    async function loadGameGames(category){ try{ const r=await fetch('/webapp/game-topup/games?lang='+(isAr?'ar':'en')+'&category='+encodeURIComponent(category),{cache:'no-store'}); const d=await r.json(); state.game.games=Array.isArray(d?.games)?d.games:[]; state.game.game=''; state.game.packages=[]; state.game.custom=null; }catch(_){ state.game.games=[]; } }
+    async function loadGamePackages(game){ try{ const r=await fetch('/webapp/game-topup/packages?lang='+(isAr?'ar':'en')+'&game='+encodeURIComponent(game),{cache:'no-store'}); const d=await r.json(); state.game.packages=Array.isArray(d?.packages)?d.packages:[]; state.game.custom=d?.custom||null; }catch(_){ state.game.packages=[]; state.game.custom=null; } }
 
     function sendAction(action, details){ const payload={type:"vaultx_webapp_request", action, details, user_id:uid(), ts:Date.now()}; if(tg?.sendData){ tg.sendData(JSON.stringify(payload)); return true; } return false; }
     function sendGateway(method,amountLocal,txid){ const payload={type:"gateway_topup", method, amount_local:Number(amountLocal), tx_id:String(txid||"").trim(), user_id:uid()}; if(tg?.sendData){ tg.sendData(JSON.stringify(payload)); return true; } return false; }
@@ -147,6 +166,22 @@
       return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">📱 ${t.digital_numbers}</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.chooseApp}</div><div class="flex flex-wrap gap-2">${appBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.chooseCountry}</div><div class="grid grid-cols-2 gap-2 max-h-72 overflow-auto">${countryBtns}</div></div>${selected?`<div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.choosePrice}</div><div class="grid grid-cols-2 gap-2">${options}</div></div>`:''}${order}</section>`;
     }
 
+    function socialBoost(){
+      const pBtns=(state.smm.platforms||[]).map(p=>`<button data-smm-platform="${esc(p.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.smm.platform===p.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(p.icon||'🚀')} ${esc(p.name)}</button>`).join('');
+      const cBtns=(state.smm.categories||[]).map(c=>`<button data-smm-category="${esc(c.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.smm.category===c.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(c.name)}</button>`).join('');
+      const sBtns=(state.smm.services||[]).map(s=>`<button data-smm-service="${esc(s.id)}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(s.name)}</div><div class="text-[11px] text-vxmuted">₽ ${rub(s.pricePerUnitRub)} • Min ${s.min} • Max ${s.max}</div></button>`).join('');
+      const service=state.smm.service;
+      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">🚀 ${t.social_boost}</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialPlatform}</div><div class="flex flex-wrap gap-2">${pBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialCategory}</div><div class="flex flex-wrap gap-2">${cBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialService}</div><div class="grid gap-2">${sBtns||`<div class="text-xs text-vxmuted">-</div>`}</div></div>${service?`<div class="glass rounded-2xl p-3"><input id="smmLink" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.accountLink}"><input id="smmQty" class="w-full mt-2 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.quantity}"><button data-action="smm-order" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.placeOrder}</button></div>`:''}</section>`;
+    }
+
+    function gameTopup(){
+      const catBtns=(state.game.categories||[]).map(c=>`<button data-game-category="${esc(c.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.game.category===c.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(c.emoji||'🎮')} ${esc(c.name)}</button>`).join('');
+      const gameBtns=(state.game.games||[]).map(g=>`<button data-game-game="${esc(g.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.game.game===g.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(g.emoji||'🎮')} ${esc(g.name)}</button>`).join('');
+      const pkgBtns=(state.game.packages||[]).map(p=>`<button data-game-package="${p.index}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(p.label)}</div><div class="text-[11px] text-vxmuted">₽ ${rub(p.priceRub)}</div></button>`).join('');
+      const custom = state.game.custom ? `<div class="glass rounded-xl p-2 border border-vxline mt-2"><div class="text-xs text-vxmuted">${t.customAmount} (${state.game.custom.min}-${state.game.custom.max}) • ₽ ${rub(state.game.custom.unitPriceRub)} / ${esc(state.game.custom.unitLabel||'unit')}</div><input id="gameCustomQty" class="w-full mt-2 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.quantity}"><button data-action="game-custom-order" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxgold to-amber-300 text-black font-extrabold py-2.5">${t.placeOrder}</button></div>` : '';
+      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">🎮 ${t.game_topup}</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.gameCategory}</div><div class="flex flex-wrap gap-2">${catBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.gameSelect}</div><div class="flex flex-wrap gap-2">${gameBtns}</div></div><div class="glass rounded-2xl p-3"><input id="gamePlayerId" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.playerId}"><div class="text-xs text-vxmuted mt-2 mb-2">${t.packageSelect}</div><div class="grid gap-2">${pkgBtns||`<div class="text-xs text-vxmuted">-</div>`}</div>${custom}</div></section>`;
+    }
+
     function payments(){
       const tabs=BOOT.methods.map(m=>`<button data-method="${m.key}" class="px-3 py-2 rounded-xl border text-xs ${m.key===state.selectedMethod?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${isAr?m.title_ar:m.title_en}</button>`).join('');
       const m=BOOT.methods.find(x=>x.key===state.selectedMethod)||BOOT.methods[0];
@@ -155,7 +190,7 @@
     }
 
     function render(){
-      const hideTop=["virtual_numbers","payments","transfer","convert"];
+      const hideTop=["virtual_numbers","payments","social_boost","game_topup","transfer","convert"];
       let html=hideTop.includes(state.view)?"":topBar();
       if(state.view==="dashboard") html+=dashboard();
       else if(state.view==="operations") html+=operations();
@@ -165,6 +200,8 @@
       else if(state.view==="transfer") html+=transfer();
       else if(state.view==="convert") html+=convert();
       else if(state.view==="virtual_numbers") html+=virtualNumbers();
+      else if(state.view==="social_boost") html+=socialBoost();
+      else if(state.view==="game_topup") html+=gameTopup();
       else if(state.view==="payments") html+=payments();
       document.getElementById("app").innerHTML=html;
       bind();
@@ -215,6 +252,8 @@
         const k=b.dataset.service;
         if(k==='digital_numbers'){ state.view='virtual_numbers'; render(); return; }
         if(k==='payments'){ state.view='payments'; render(); return; }
+        if(k==='social_boost'){ state.view='social_boost'; if(!state.smm.platforms.length){ await loadSmmPlatforms(); if(state.smm.platform) await loadSmmCategories(state.smm.platform); } render(); return; }
+        if(k==='game_topup'){ state.view='game_topup'; if(!state.game.categories.length){ await loadGameCategories(); } render(); return; }
         const ok=sendAction('open_service:'+k,{source:'vaultx_super_app'}); if(ok) toast(t.loading,true); else toast(t.openInTelegram,false);
       });
       document.querySelectorAll('[data-top]').forEach(b=>b.onclick=()=>{ const k=b.dataset.top; state.view=k; render(); });
@@ -229,6 +268,14 @@
       document.querySelectorAll('[data-vn-app]').forEach(b=>b.onclick=async()=>{ state.vn.app=b.dataset.vnApp; await loadVnCountries(state.vn.app); render(); });
       document.querySelectorAll('[data-vn-country]').forEach(b=>b.onclick=()=>{ state.vn.selectedCountry=(state.vn.countries||[]).find(x=>String(x.id)===String(b.dataset.vnCountry))||null; render(); });
       document.querySelectorAll('[data-vn-buy]').forEach(b=>b.onclick=()=>buyVirtual(state.vn.app,b.dataset.vnBuy,b.dataset.vnProvider,Number(b.dataset.vnPrice||0)));
+      document.querySelectorAll('[data-smm-platform]').forEach(b=>b.onclick=async()=>{ state.smm.platform=b.dataset.smmPlatform; await loadSmmCategories(state.smm.platform); render(); });
+      document.querySelectorAll('[data-smm-category]').forEach(b=>b.onclick=async()=>{ state.smm.category=b.dataset.smmCategory; await loadSmmServices(state.smm.platform,state.smm.category); render(); });
+      document.querySelectorAll('[data-smm-service]').forEach(b=>b.onclick=()=>{ state.smm.service=(state.smm.services||[]).find(x=>String(x.id)===String(b.dataset.smmService))||null; render(); });
+      const smmOrder=document.querySelector('[data-action="smm-order"]'); if(smmOrder) smmOrder.onclick=async()=>{ const link=document.getElementById('smmLink')?.value?.trim()||''; const qty=Number(document.getElementById('smmQty')?.value||0); if(!state.smm.service||!link||!qty){ toast(isAr?'تحقق من البيانات':'Check fields',false); return;} const r=await fetch('/webapp/social-boost/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),platform:state.smm.platform,category:state.smm.category,service_id:state.smm.service.id,link,quantity:qty})}); const d=await r.json(); if(!d?.ok){ toast(isAr?'فشل تنفيذ الطلب':'Order failed',false); return;} await refreshProfile(); await loadOps(); toast((isAr?'تم تنفيذ الطلب: ':'Order created: ')+(d.order_id||''),true); };
+      document.querySelectorAll('[data-game-category]').forEach(b=>b.onclick=async()=>{ state.game.category=b.dataset.gameCategory; await loadGameGames(state.game.category); render(); });
+      document.querySelectorAll('[data-game-game]').forEach(b=>b.onclick=async()=>{ state.game.game=b.dataset.gameGame; await loadGamePackages(state.game.game); render(); });
+      document.querySelectorAll('[data-game-package]').forEach(b=>b.onclick=async()=>{ const playerId=document.getElementById('gamePlayerId')?.value?.trim()||''; if(!playerId){ toast(isAr?'ادخل ايدي اللعبة':'Enter game ID',false); return;} const r=await fetch('/webapp/game-topup/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),game_key:state.game.game,player_id:playerId,package_index:Number(b.dataset.gamePackage)})}); const d=await r.json(); if(!d?.ok){ toast(isAr?'فشل تنفيذ الطلب':'Order failed',false); return;} await refreshProfile(); await loadOps(); toast((isAr?'تم تنفيذ الطلب: ':'Order created: ')+(d.order_id||''),true); });
+      const gameCustom=document.querySelector('[data-action="game-custom-order"]'); if(gameCustom) gameCustom.onclick=async()=>{ const playerId=document.getElementById('gamePlayerId')?.value?.trim()||''; const q=Number(document.getElementById('gameCustomQty')?.value||0); if(!playerId||!q){ toast(isAr?'تحقق من البيانات':'Check fields',false); return;} const r=await fetch('/webapp/game-topup/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),game_key:state.game.game,player_id:playerId,custom_quantity:q})}); const d=await r.json(); if(!d?.ok){ toast(isAr?'فشل تنفيذ الطلب':'Order failed',false); return;} await refreshProfile(); await loadOps(); toast((isAr?'تم تنفيذ الطلب: ':'Order created: ')+(d.order_id||''),true); };
       const vc=document.querySelector('[data-action="vn-check-code"]'); if(vc) vc.onclick=()=>checkCode();
       document.querySelectorAll('[data-method]').forEach(b=>b.onclick=()=>{ state.selectedMethod=b.dataset.method; render(); });
       const cp=document.querySelector('[data-action="copy-account"]'); if(cp) cp.onclick=async()=>{ const txt=document.getElementById('accId')?.innerText||''; try{ await navigator.clipboard.writeText(txt); cp.textContent=t.copied; setTimeout(()=>cp.textContent=t.copy,900);}catch(_){}};

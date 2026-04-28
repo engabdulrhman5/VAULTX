@@ -27,7 +27,10 @@ const {
   getCachedCountries,
   grizzlyCountries,
 } = require("./services/grizzlyCacheService");
-const { fetchAndCacheSmmServices } = require("./services/smmCacheService");
+const { smmServices, getPlatform, getCategory, getServiceInfo } = require("./constants/smmServices");
+const { fetchAndCacheSmmServices, getCachedSmmServiceById, createSmmOrder } = require("./services/smmCacheService");
+const { getGameTopupCatalog, getGamesByCategory, getGameByKey } = require("./services/gameTopupCatalogService");
+const { executeGameTopupOrder } = require("./services/gameTopupProviderService");
 const {
   handleStart,
   handleLanguageSelection,
@@ -115,6 +118,8 @@ function isLikelyMojibake(value) {
   if (!text) return false;
   return /[ØÙÚÛÜÝÞß]|ط|ظ|ðŸ|�/.test(text);
 }
+
+const USD_TO_RUB_RATE = Number(process.env.USD_TO_RUB_RATE || 30);
 
 async function handleCryptoWebhookEvent(event) {
   const invoiceId = Number(event?.invoice_id);
@@ -556,7 +561,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
               const sellPrice = Math.ceil(parseFloat(supplierPrice) * 25 * 1.2);
               const countryMeta = getGrizzlyCountryMeta(countryId);
               const providerCountryName = String((countriesMap || {})[String(countryId)] || "").trim();
-              const safeProviderCountryName = isLikelyMojibake(providerCountryName) ? "" : providerCountryName;
+              const safeProviderCountryName = ""; // keep names consistent with main bot mapping
               const safeMetaEn = isLikelyMojibake(countryMeta?.name_en) ? "" : String(countryMeta?.name_en || "").trim();
               const safeMetaAr = isLikelyMojibake(countryMeta?.name_ar) ? "" : String(countryMeta?.name_ar || "").trim();
               const countryName = safeProviderCountryName || safeMetaEn || safeMetaAr || `Country ${countryId}`;
@@ -718,6 +723,252 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           logBotError("http.webapp.vn.buy", error);
           res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: "buy_failed" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/social-boost/platforms") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const platforms = smmServices.map((p) => ({
+          key: p.key,
+          name: lang === "ar" ? p.label_ar : p.label_en,
+          icon: p.icon,
+        }));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, platforms }));
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/social-boost/categories") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const platformKey = String(req.query?.platform || "");
+        const platform = getPlatform(platformKey);
+        if (!platform) {
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "platform_not_found" }));
+          return;
+        }
+        const categories = (platform.categories || []).map((c) => ({
+          key: c.key,
+          name: lang === "ar" ? c.label_ar : c.label_en,
+        }));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, categories }));
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/social-boost/services") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const platformKey = String(req.query?.platform || "");
+        const categoryKey = String(req.query?.category || "");
+        const category = getCategory(platformKey, categoryKey);
+        if (!category) {
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "category_not_found" }));
+          return;
+        }
+        const services = (category.services || []).map((s) => {
+          const serviceInfo = getServiceInfo(s.id);
+          const cached = getCachedSmmServiceById(s.id);
+          const unit = Number(cached?.pricePerUnitRub || 0);
+          return {
+            id: String(s.id),
+            name: lang === "ar" ? (cached?.nameAr || serviceInfo?.service?.name_ar || s.name_ar) : (cached?.nameEn || serviceInfo?.service?.name_en || s.name_en),
+            pricePerUnitRub: Number.isFinite(unit) ? Number(unit.toFixed(4)) : 0,
+            min: Number(cached?.min || 0),
+            max: Number(cached?.max || 0),
+          };
+        }).filter((x) => x.pricePerUnitRub > 0);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, services }));
+        return;
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/webapp/social-boost/order") {
+        try {
+          const payload = await readJsonBody(req);
+          const userId = Number(payload?.user_id || 0);
+          const serviceId = String(payload?.service_id || "");
+          const link = String(payload?.link || "").trim();
+          const quantity = Number(payload?.quantity || 0);
+          const user = appStore.findUserById(userId);
+          const cached = getCachedSmmServiceById(serviceId);
+          if (!user || !cached || !link || !Number.isFinite(quantity)) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "invalid_payload" }));
+            return;
+          }
+          const min = Number(cached.min || 1);
+          const max = Number(cached.max || 100000);
+          if (quantity < min || quantity > max) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "invalid_quantity", min, max }));
+            return;
+          }
+          const total = Number((Number(cached.pricePerUnitRub || 0) * quantity).toFixed(4));
+          if (Number(user.balance || 0) < total) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "insufficient_balance", need: total, balance: Number(user.balance || 0) }));
+            return;
+          }
+          const order = await createSmmOrder({ serviceId, link, quantity });
+          if (!order?.success) {
+            res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_failed" }));
+            return;
+          }
+          appStore.deductBalance(userId, total);
+          appStore.incrementTransactions(userId);
+          appStore.addProfit(total);
+          appStore.addTransaction({
+            type: "social_boost_order",
+            userId,
+            serviceKey: "social_boost",
+            serviceId,
+            link,
+            quantity,
+            amount: total,
+            providerOrderId: String(order.orderId || ""),
+          });
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, order_id: String(order.orderId || ""), charged_rub: total }));
+        } catch (error) {
+          logBotError("http.webapp.smm.order", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "order_failed" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/game-topup/categories") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const catalog = await getGameTopupCatalog();
+        const categories = (catalog.categories || []).map((c) => ({ key: c.key, emoji: c.emoji, name: lang === "ar" ? c.name_ar : c.name_en }));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, categories }));
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/game-topup/games") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const categoryKey = String(req.query?.category || "");
+        const catalog = await getGameTopupCatalog();
+        const games = getGamesByCategory(catalog, categoryKey).map((g) => ({ key: g.key, emoji: g.emoji, name: lang === "ar" ? g.name_ar : g.name_en }));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, games }));
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/game-topup/packages") {
+        const lang = String(req.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
+        const gameKey = String(req.query?.game || "");
+        const catalog = await getGameTopupCatalog();
+        const game = getGameByKey(catalog, gameKey);
+        if (!game) {
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "game_not_found" }));
+          return;
+        }
+        const packages = (game.packages || []).map((p, i) => ({
+          index: i,
+          label: lang === "ar" ? p.units_ar : p.units_en,
+          priceRub: Number((Number(p.priceRub || 0) * USD_TO_RUB_RATE).toFixed(2)),
+        }));
+        const custom = game.custom ? {
+          min: Number(game.custom.min || 0),
+          max: Number(game.custom.max || 0),
+          unitLabel: lang === "ar" ? game.custom.unitLabelAr : game.custom.unitLabelEn,
+          unitPriceRub: Number((Number(game.custom.unitPriceRub || 0) * USD_TO_RUB_RATE).toFixed(4)),
+        } : null;
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, game: { key: game.key, name: lang === "ar" ? game.name_ar : game.name_en, emoji: game.emoji }, packages, custom }));
+        return;
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/webapp/game-topup/order") {
+        try {
+          const payload = await readJsonBody(req);
+          const userId = Number(payload?.user_id || 0);
+          const gameKey = String(payload?.game_key || "");
+          const playerId = String(payload?.player_id || "").trim();
+          const user = appStore.findUserById(userId);
+          const catalog = await getGameTopupCatalog();
+          const game = getGameByKey(catalog, gameKey);
+          if (!user || !game || !playerId) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "invalid_payload" }));
+            return;
+          }
+
+          let totalRub = 0;
+          let packageItem = null;
+          let quantity = null;
+          let packageLabel = "";
+          if (payload?.package_index !== undefined && payload?.package_index !== null && String(payload.package_index) !== "") {
+            packageItem = game.packages[Number(payload.package_index)];
+            if (!packageItem) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "invalid_package" }));
+              return;
+            }
+            totalRub = Number((Number(packageItem.priceRub || 0) * USD_TO_RUB_RATE).toFixed(2));
+            packageLabel = packageItem.units_ar || packageItem.units_en || "Package";
+          } else {
+            const customQuantity = Number(payload?.custom_quantity || 0);
+            if (!game.custom || !Number.isFinite(customQuantity) || customQuantity <= 0) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "invalid_custom_quantity" }));
+              return;
+            }
+            const min = Number(game.custom.min || 0);
+            const max = Number(game.custom.max || 0);
+            if (customQuantity < min || customQuantity > max) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "custom_quantity_out_of_range", min, max }));
+              return;
+            }
+            quantity = customQuantity;
+            totalRub = Number((Number(game.custom.unitPriceRub || 0) * customQuantity * USD_TO_RUB_RATE).toFixed(2));
+            packageLabel = `${customQuantity} ${game.custom.unitLabelAr || game.custom.unitLabelEn || "Units"}`;
+          }
+
+          if (Number(user.balance || 0) < totalRub) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "insufficient_balance", need: totalRub, balance: Number(user.balance || 0) }));
+            return;
+          }
+
+          const order = await executeGameTopupOrder({ game, playerId, packageItem, quantity });
+          if (!order?.success) {
+            res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_failed" }));
+            return;
+          }
+
+          appStore.deductBalance(userId, totalRub);
+          appStore.incrementTransactions(userId);
+          appStore.addProfit(totalRub);
+          appStore.addTransaction({
+            type: "game_topup_order",
+            serviceKey: "game_topup",
+            userId,
+            amount: totalRub,
+            gameKey: game.key,
+            gameNameAr: game.name_ar,
+            gameNameEn: game.name_en,
+            playerId,
+            packageLabel,
+            quantity: quantity || null,
+            providerOrderId: String(order.orderId || ""),
+            provider: order.provider,
+            providerStatus: order.status,
+          });
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, order_id: String(order.orderId || ""), charged_rub: totalRub, package_label: packageLabel }));
+        } catch (error) {
+          logBotError("http.webapp.game.order", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "order_failed" }));
         }
         return;
       }
