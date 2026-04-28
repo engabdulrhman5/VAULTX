@@ -463,7 +463,12 @@ async function sendGatewayWebAppLauncher(bot, chatId, methodKey, options = {}) {
     return sendPlaceholderTopupMethod(bot, chatId, method, options);
   }
 
-  const webAppUrl = buildPublicUrl("/webapp/recharge", { method, lang, user_id: userId });
+  const webAppUrl = buildPublicUrl("/webapp/app", {
+    method,
+    lang,
+    user_id: userId,
+    screen: "payment",
+  });
   if (!webAppUrl) {
     throw new Error("PUBLIC_BASE_URL is missing for WebApp launch");
   }

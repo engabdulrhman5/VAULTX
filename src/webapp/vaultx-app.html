@@ -1,0 +1,370 @@
+﻿<!doctype html>
+<html lang="__LANG__" dir="__DIR__">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>VaultX Pro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { cairo: ["Cairo", "sans-serif"] },
+          colors: {
+            vxbg: "#05070d",
+            vxcard: "rgba(16,22,34,.62)",
+            vxline: "rgba(107,140,199,.32)",
+            vxtxt: "#eaf2ff",
+            vxmuted: "#9aa8c5",
+            vxblue: "#4ea3ff",
+            vxgold: "#f4c96a"
+          },
+          boxShadow: {
+            glow: "0 0 0 3px rgba(78,163,255,.25)",
+            card: "0 20px 60px rgba(0,0,0,.45)"
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {
+      background:
+        radial-gradient(circle at 12% 0%, rgba(32, 68, 120, .55), transparent 35%),
+        radial-gradient(circle at 87% 100%, rgba(55, 30, 85, .5), transparent 38%),
+        #05070d;
+    }
+    .glass {
+      background: rgba(16,22,34,.62);
+      border: 1px solid rgba(107,140,199,.32);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .fade-in { animation: fadeIn .25s ease; }
+    .slide-up { animation: slideUp .32s cubic-bezier(.2,.8,.2,1); }
+    .pulse-ok { animation: pulseOk .9s ease; }
+    @keyframes fadeIn { from {opacity:.2} to {opacity:1} }
+    @keyframes slideUp { from {opacity:.1; transform: translateY(12px)} to {opacity:1; transform: translateY(0)} }
+    @keyframes pulseOk { 0% { transform: scale(1);} 35% { transform: scale(1.03);} 100% { transform: scale(1);} }
+    .loader { width:18px;height:18px;border-radius:999px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg);} }
+  </style>
+</head>
+<body class="font-cairo text-vxtxt min-h-screen">
+  <div id="app" class="max-w-md mx-auto px-3 py-3 pb-24"></div>
+
+  <script>
+    const BOOT = __BOOTSTRAP_JSON__;
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (tg) { tg.ready(); tg.expand(); tg.MainButton.hide(); }
+
+    const isAr = BOOT.lang === "ar";
+    const t = {
+      appTitle: "VaultX Pro",
+      wallet: isAr ? "رصيد المحفظة" : "Wallet",
+      level: isAr ? "المستوى" : "Level",
+      settings: isAr ? "الإعدادات" : "Settings",
+      submit: isAr ? "تنفيذ الآن" : "Submit",
+      processing: isAr ? "جارٍ التنفيذ..." : "Processing...",
+      success: isAr ? "تم إرسال الطلب بنجاح" : "Request sent successfully",
+      paymentCenter: isAr ? "مركز الدفع" : "Payment Center",
+      serviceHub: isAr ? "الخدمات" : "Services",
+      digital_numbers: isAr ? "الأرقام الوهمية" : "Digital Numbers",
+      social_boost: isAr ? "رشق الحسابات" : "Social Media SMM",
+      game_topup: isAr ? "شحن الألعاب" : "Gaming Top-up",
+      pro_accounts: isAr ? "حسابات Pro" : "Pro Accounts",
+      cloud_services: isAr ? "الخدمات السحابية" : "Cloud Services",
+      back: isAr ? "رجوع" : "Back",
+      copy: isAr ? "نسخ" : "Copy",
+      copied: isAr ? "تم النسخ" : "Copied",
+      txid: isAr ? "رقم العملية" : "Transaction ID",
+      amount: isAr ? "المبلغ" : "Amount",
+      payConfirm: isAr ? "تأكيد الدفع" : "Confirm Payment",
+      converter: isAr ? "الرصيد المتوقع" : "Expected Credit",
+    };
+
+    const services = [
+      { key: "digital_numbers", icon: "📱", color: "from-blue-500/25 to-cyan-400/10" },
+      { key: "social_boost", icon: "🚀", color: "from-violet-500/25 to-fuchsia-400/10" },
+      { key: "game_topup", icon: "🎮", color: "from-emerald-500/25 to-lime-400/10" },
+      { key: "pro_accounts", icon: "💎", color: "from-amber-500/25 to-yellow-400/10" },
+      { key: "cloud_services", icon: "☁️", color: "from-indigo-500/25 to-sky-400/10" },
+      { key: "payments", icon: "💳", color: "from-teal-500/25 to-cyan-400/10" },
+    ];
+
+    const formSchemas = {
+      digital_numbers: [
+        { id: "app", label: isAr ? "التطبيق" : "App", type: "select", options: ["WhatsApp", "Telegram", "Instagram", "Facebook"] },
+        { id: "country", label: isAr ? "الدولة" : "Country", type: "text", placeholder: isAr ? "مثال: مصر" : "e.g. Egypt" },
+        { id: "category", label: isAr ? "الفئة/السعر" : "Category/Price", type: "text", placeholder: isAr ? "مثال: VIP" : "e.g. VIP" }
+      ],
+      social_boost: [
+        { id: "platform", label: isAr ? "المنصة" : "Platform", type: "select", options: ["Instagram", "TikTok", "Telegram", "YouTube"] },
+        { id: "service", label: isAr ? "نوع الخدمة" : "Service type", type: "text", placeholder: isAr ? "مثال: متابعين" : "e.g. Followers" },
+        { id: "target", label: isAr ? "الرابط/المعرف" : "Link/Username", type: "text", placeholder: "https://..." },
+        { id: "quantity", label: isAr ? "الكمية" : "Quantity", type: "number", placeholder: "1000" }
+      ],
+      game_topup: [
+        { id: "game", label: isAr ? "اللعبة" : "Game", type: "text", placeholder: isAr ? "مثال: PUBG" : "e.g. PUBG" },
+        { id: "player_id", label: isAr ? "آيدي اللاعب" : "Player ID", type: "text", placeholder: "123456789" },
+        { id: "package", label: isAr ? "الباقة" : "Package", type: "text", placeholder: isAr ? "مثال: 660 UC" : "e.g. 660 UC" }
+      ],
+      pro_accounts: [
+        { id: "category", label: isAr ? "الفئة" : "Category", type: "select", options: ["AI Tools", "Entertainment", "Design", "Verification"] },
+        { id: "app", label: isAr ? "التطبيق" : "App", type: "text", placeholder: "ChatGPT / Netflix / ..." },
+        { id: "plan", label: isAr ? "الخطة" : "Plan", type: "text", placeholder: "Plus / Premium" },
+        { id: "duration", label: isAr ? "المدة" : "Duration", type: "text", placeholder: isAr ? "شهر واحد" : "1 Month" },
+        { id: "method", label: isAr ? "طريقة التفعيل" : "Activation", type: "select", options: [isAr ? "على حسابي" : "My Account", isAr ? "حساب جديد" : "New Account"] }
+      ],
+      cloud_services: [
+        { id: "type", label: isAr ? "نوع الخدمة" : "Type", type: "select", options: ["VPS", "Domain", "Web Hosting", "VPN"] },
+        { id: "spec", label: isAr ? "المواصفات" : "Specification", type: "text", placeholder: isAr ? "2GB RAM | 2 vCPU" : "2GB RAM | 2 vCPU" },
+        { id: "duration", label: isAr ? "المدة" : "Duration", type: "text", placeholder: isAr ? "شهر" : "1 Month" }
+      ]
+    };
+
+    const state = {
+      view: BOOT.initialScreen === "payment" ? "payments" : "dashboard",
+      selectedMethod: BOOT.initialMethod || (BOOT.methods[0] ? BOOT.methods[0].key : "binance")
+    };
+
+    function moneyRub(v) {
+      const n = Number(v || 0);
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function calcRub(method, amount) {
+      const m = BOOT.methods.find(function(x){ return x.key === method; });
+      const val = Number(String(amount || "").replace(",", "."));
+      if (!Number.isFinite(val) || val <= 0 || !m) return 0;
+      if (method === "binance") return val * (m.rub_per_unit || 30);
+      const p = Number(m.local_per_rub || 0);
+      if (!p) return 0;
+      return val / p;
+    }
+
+    function sendAction(action, details) {
+      const payload = {
+        type: "vaultx_webapp_request",
+        action: action,
+        details: details,
+        user_id: BOOT.user.id,
+        ts: Date.now()
+      };
+      if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
+    }
+
+    function sendGateway(method, amountLocal, txId) {
+      const payload = {
+        type: "gateway_topup",
+        method: method,
+        amount_local: Number(amountLocal),
+        tx_id: String(txId || "").trim(),
+        user_id: BOOT.user.id
+      };
+      if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
+    }
+
+    function cardStat(title, value, badge) {
+      return '<div class="glass rounded-2xl p-3 shadow-card slide-up">' +
+        '<div class="text-vxmuted text-xs">' + title + '</div>' +
+        '<div class="flex items-center justify-between mt-1">' +
+          '<div class="text-sm font-bold">' + value + '</div>' +
+          '<div class="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-vxgold">' + badge + '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderHeader() {
+      return '<header class="glass rounded-2xl p-3 mb-3 shadow-card fade-in">' +
+        '<div class="flex items-center justify-between">' +
+          '<div>' +
+            '<div class="text-sm font-extrabold tracking-wide">' + t.appTitle + '</div>' +
+            '<div class="text-[11px] text-vxmuted">@' + (BOOT.user.username || 'vaultx_user') + '</div>' +
+          '</div>' +
+          '<button class="w-9 h-9 rounded-xl border border-vxline bg-white/5 text-lg" data-action="open-settings">⚙️</button>' +
+        '</div>' +
+        '<div class="grid grid-cols-2 gap-2 mt-3">' +
+          cardStat(t.wallet, moneyRub(BOOT.user.balanceRub) + ' RUB', 'RUB') +
+          cardStat(t.level, BOOT.user.level, BOOT.user.xp + '% XP') +
+        '</div>' +
+      '</header>';
+    }
+
+    function renderDashboard() {
+      const cards = services.map(function(s){
+        return '<button data-service="' + s.key + '" class="glass rounded-2xl p-3 text-start shadow-card bg-gradient-to-br ' + s.color + ' border border-vxline hover:border-vxblue/40 transition slide-up">' +
+          '<div class="text-2xl">' + s.icon + '</div>' +
+          '<div class="text-sm mt-1 font-bold">' + (t[s.key] || s.key) + '</div>' +
+          '<div class="text-[11px] text-vxmuted mt-0.5">' + (s.key === 'payments' ? t.paymentCenter : t.serviceHub) + '</div>' +
+        '</button>';
+      }).join('');
+      return '<div class="grid grid-cols-2 gap-2">' + cards + '</div>';
+    }
+
+    function renderField(field) {
+      if (field.type === 'select') {
+        return '<label class="text-xs text-vxmuted">' + field.label + '</label>' +
+          '<select name="' + field.id + '" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow">' +
+            field.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
+          '</select>';
+      }
+      return '<label class="text-xs text-vxmuted">' + field.label + '</label>' +
+        '<input name="' + field.id + '" type="' + (field.type || 'text') + '" placeholder="' + (field.placeholder || '') + '" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" />';
+    }
+
+    function renderServiceForm(serviceKey) {
+      const schema = formSchemas[serviceKey] || [];
+      return '<div class="glass rounded-2xl p-3 shadow-card slide-up">' +
+        '<div class="flex items-center justify-between mb-2">' +
+          '<div class="font-bold">' + (t[serviceKey] || serviceKey) + '</div>' +
+          '<button class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-vxline" data-action="go-dashboard">' + t.back + '</button>' +
+        '</div>' +
+        '<form id="serviceForm" data-service="' + serviceKey + '" class="space-y-2">' +
+          schema.map(renderField).join('') +
+          '<button type="submit" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">' + t.submit + '</button>' +
+        '</form>' +
+      '</div>';
+    }
+
+    function renderPayments() {
+      const tabs = BOOT.methods.map(function(m){
+        const active = m.key === state.selectedMethod;
+        return '<button data-method="' + m.key + '" class="px-3 py-2 rounded-xl border text-xs ' + (active ? 'bg-vxblue text-black border-vxblue' : 'bg-white/5 border-vxline') + '">' + (isAr ? m.title_ar : m.title_en) + '</button>';
+      }).join('');
+
+      const m = BOOT.methods.find(function(x){ return x.key === state.selectedMethod; }) || BOOT.methods[0];
+      const rateText = state.selectedMethod === 'binance'
+        ? ('1 USD = ' + ((m && m.rub_per_unit) || 30) + ' RUB')
+        : ('1 RUB = ' + ((m && m.local_per_rub) || 0) + ' ' + ((m && m.local_currency) || ''));
+
+      return '<div class="space-y-2 slide-up">' +
+        '<div class="glass rounded-2xl p-3 shadow-card">' +
+          '<div class="flex items-center justify-between">' +
+            '<div class="font-bold">' + t.paymentCenter + '</div>' +
+            '<button class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-vxline" data-action="go-dashboard">' + t.back + '</button>' +
+          '</div>' +
+          '<div class="flex flex-wrap gap-2 mt-2">' + tabs + '</div>' +
+        '</div>' +
+
+        '<div class="glass rounded-2xl p-3 shadow-card">' +
+          '<div class="text-xs text-vxmuted">' + (isAr ? 'رقم الحساب' : 'Account ID') + '</div>' +
+          '<div class="flex items-center gap-2 mt-1">' +
+            '<div id="accId" class="font-bold text-sm flex-1 break-all">' + ((m && m.account_id) || '-') + '</div>' +
+            '<button data-action="copy-account" class="px-3 py-2 rounded-xl border border-vxline bg-white/5 text-xs">' + t.copy + '</button>' +
+          '</div>' +
+
+          '<div class="text-xs text-vxmuted mt-3">' + t.amount + ' (' + ((m && m.local_currency) || '') + ')</div>' +
+          '<input id="payAmount" inputmode="decimal" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" placeholder="0.00" />' +
+
+          '<div class="text-xs text-vxmuted mt-3">' + t.txid + '</div>' +
+          '<input id="payTx" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" placeholder="TX123..." />' +
+
+          '<div id="payConv" class="mt-3 rounded-xl border border-vxline bg-white/5 px-3 py-2 text-sm">' + t.converter + ': 0.00 RUB</div>' +
+          '<div class="text-[11px] text-vxmuted mt-1">' + rateText + '</div>' +
+
+          '<button data-action="submit-payment" class="w-full mt-3 rounded-xl bg-gradient-to-r from-vxgold to-amber-300 text-black font-extrabold py-2.5 flex items-center justify-center gap-2">' +
+            '<span>' + t.payConfirm + '</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+      let body = renderHeader();
+      if (state.view === 'dashboard') body += renderDashboard();
+      else if (state.view === 'payments') body += renderPayments();
+      else body += renderServiceForm(state.view);
+      app.innerHTML = body;
+      bindEvents();
+      refreshPaymentPreview();
+    }
+
+    function refreshPaymentPreview() {
+      const amountInput = document.getElementById('payAmount');
+      const out = document.getElementById('payConv');
+      if (!amountInput || !out) return;
+      const repaint = function() {
+        const x = Number(String(amountInput.value || '').replace(',', '.'));
+        const rr = Number.isFinite(x) ? calcRub(state.selectedMethod, x) : 0;
+        out.textContent = t.converter + ': ' + rr.toFixed(2) + ' RUB';
+      };
+      repaint();
+      amountInput.oninput = repaint;
+    }
+
+    function showToast(text, ok) {
+      const toast = document.createElement('div');
+      toast.className = 'fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm pulse-ok ' + (ok ? 'bg-emerald-500/20 border-emerald-400/40' : 'bg-rose-500/20 border-rose-400/40');
+      toast.textContent = text;
+      document.body.appendChild(toast);
+      setTimeout(function(){ toast.remove(); }, 1600);
+    }
+
+    function bindEvents() {
+      document.querySelectorAll('[data-service]').forEach(function(btn){
+        btn.onclick = function(){ state.view = btn.dataset.service; render(); };
+      });
+      document.querySelectorAll('[data-action="go-dashboard"]').forEach(function(btn){
+        btn.onclick = function(){ state.view = 'dashboard'; render(); };
+      });
+      document.querySelectorAll('[data-action="open-settings"]').forEach(function(btn){
+        btn.onclick = function(){ showToast(isAr ? 'الإعدادات قريباً' : 'Settings soon', true); };
+      });
+
+      const form = document.getElementById('serviceForm');
+      if (form) {
+        form.onsubmit = function(e){
+          e.preventDefault();
+          const data = Object.fromEntries(new FormData(form).entries());
+          sendAction('service_request:' + form.dataset.service, data);
+          showToast(t.success, true);
+          if (tg) setTimeout(function(){ tg.close(); }, 550);
+        };
+      }
+
+      document.querySelectorAll('[data-method]').forEach(function(btn){
+        btn.onclick = function(){ state.selectedMethod = btn.dataset.method; state.view = 'payments'; render(); };
+      });
+
+      const copyBtn = document.querySelector('[data-action="copy-account"]');
+      if (copyBtn) {
+        copyBtn.onclick = async function(){
+          const text = (document.getElementById('accId') || {}).innerText || '';
+          try {
+            await navigator.clipboard.writeText(text);
+            copyBtn.textContent = t.copied;
+            setTimeout(function(){ copyBtn.textContent = t.copy; }, 1000);
+          } catch (_) {}
+        };
+      }
+
+      const submitPay = document.querySelector('[data-action="submit-payment"]');
+      if (submitPay) {
+        submitPay.onclick = function(){
+          const amount = (document.getElementById('payAmount') || {}).value || '';
+          const txid = (document.getElementById('payTx') || {}).value || '';
+          const n = Number(String(amount).replace(',', '.'));
+          if (!Number.isFinite(n) || n <= 0 || !String(txid).trim()) {
+            showToast(isAr ? 'تحقق من البيانات' : 'Check required fields', false);
+            return;
+          }
+          submitPay.innerHTML = '<div class="loader"></div><span>' + t.processing + '</span>';
+          sendGateway(state.selectedMethod, n, txid);
+          setTimeout(function(){
+            showToast(t.success, true);
+            if (tg) tg.close();
+          }, 420);
+        };
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 ﻿require("dotenv").config();
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
-const { BOT_TOKEN, ADMIN_CHANNEL_ID } = require("./config");
+const { BOT_TOKEN, ADMIN_CHANNEL_ID, PUBLIC_BASE_URL } = require("./config");
 const { AppStore } = require("./services/appStore");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
@@ -46,6 +46,8 @@ const {
   renderGatewayWebAppPage,
   startBinanceEmailWatcher,
 } = require("./services/topupVerificationService");
+const { handleVaultXWebAppData } = require("./services/webAppBridgeService");
+const { renderVaultXWebAppPage } = require("./services/webAppUiService");
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
@@ -310,6 +312,10 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
 
       if (req.method === "GET" && requestUrl.pathname === "/webapp/recharge") {
         renderGatewayWebAppPage(req, res);
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/app") {
+        renderVaultXWebAppPage(req, res, appStore);
         return;
       }
 
@@ -895,6 +901,10 @@ bot.on("message", async (msg) => {
       if (webAppHandled) {
         return;
       }
+      const vaultWebAppHandled = await handleVaultXWebAppData(bot, msg, appStore);
+      if (vaultWebAppHandled) {
+        return;
+      }
     }
 
     if (!msg.text) {
@@ -955,6 +965,18 @@ async function bootstrap() {
     appContext.botUsername = botInfo.username;
     await setupBotCommands(bot);
     startBinanceEmailWatcher(bot, appStore);
+    if (PUBLIC_BASE_URL) {
+      const webAppUrl = `${String(PUBLIC_BASE_URL).replace(/\/+$/, "")}/webapp/app?lang=ar`;
+      await safeTelegramCall("bootstrap.setChatMenuButton", () =>
+        bot.setChatMenuButton({
+          menu_button: {
+            type: "web_app",
+            text: "VaultX Pro",
+            web_app: { url: webAppUrl },
+          },
+        })
+      );
+    }
     console.log(`Telegram bot is running as @${botInfo.username}`);
     if (telegramProxyUrl) {
       console.log("[telegram] proxy is enabled");
