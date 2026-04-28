@@ -16,8 +16,10 @@ const {
   getSmsStatus,
   cancelNumber,
   getGrizzlyVirtualNumberCatalog,
+  getServicePrices,
 } = require("./services/grizzlyService");
 const { getSmsProvider } = require("./constants/smsProviders");
+const { getGrizzlyServiceCode, getGrizzlyCountryMeta } = require("./constants/grizzly");
 const { t, getUserLang } = require("./locales");
 const {
   fetchAndCachePrices,
@@ -374,6 +376,137 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
         res.end(JSON.stringify({ ok: true, transactions }));
         return;
       }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/referral-stats") {
+        const userId = Number(req.query?.user_id || 0);
+        const totalInvites = appStore.users.filter((u) => Number(u.invitedBy || 0) === userId).length;
+        const activeUsers = appStore.users.filter((u) => Number(u.invitedBy || 0) === userId && Number(u.transactionsCount || 0) > 0).length;
+        const totalEarnings = Number(appStore.transactions
+          .filter((tx) => tx.type === "referral_reward" && Number(tx.userId || 0) === userId)
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+          .toFixed(2));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, stats: { totalInvites, activeUsers, totalEarnings } }));
+        return;
+      }
+      if (req.method === "POST" && requestUrl.pathname === "/webapp/transfer") {
+        try {
+          const payload = await readJsonBody(req);
+          const userId = Number(payload?.user_id || 0);
+          const targetId = Number(payload?.target_id || 0);
+          const currency = String(payload?.currency || "RUB").toUpperCase();
+          const amount = Number(payload?.amount || 0);
+          const sender = appStore.findUserById(userId);
+          const receiver = appStore.findUserById(targetId);
+          if (!sender || !receiver || !Number.isFinite(amount) || amount <= 0) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "invalid_transfer_data" }));
+            return;
+          }
+
+          if (currency === "USD") {
+            const senderUsd = Number(sender.usdBalance || Number((Number(sender.balance || 0) / 30).toFixed(2)));
+            if (senderUsd < amount) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
+              return;
+            }
+            appStore.deductUsdBalance(sender.userId, amount);
+            appStore.addUsdBalance(receiver.userId, amount);
+          } else {
+            if (Number(sender.balance || 0) < amount) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
+              return;
+            }
+            appStore.deductBalance(sender.userId, amount);
+            appStore.addBalance(receiver.userId, amount);
+          }
+
+          appStore.addTransaction({
+            type: "transfer_out",
+            userId: sender.userId,
+            targetUserId: receiver.userId,
+            amount,
+            currency,
+            status: "completed",
+          });
+          appStore.addTransaction({
+            type: "transfer_in",
+            userId: receiver.userId,
+            sourceUserId: sender.userId,
+            amount,
+            currency,
+            status: "completed",
+          });
+
+          await safeTelegramCall("webapp.transfer.notify.receiver", () =>
+            bot.sendMessage(
+              receiver.userId,
+              currency === "USD"
+                ? `💸 You received ${amount} USD from user ${sender.userId}`
+                : `💸 You received ${amount} RUB from user ${sender.userId}`
+            )
+          );
+
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (error) {
+          logBotError("http.webapp.transfer", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "transfer_failed" }));
+        }
+        return;
+      }
+      if (req.method === "POST" && requestUrl.pathname === "/webapp/convert") {
+        try {
+          const payload = await readJsonBody(req);
+          const userId = Number(payload?.user_id || 0);
+          const from = String(payload?.from || "RUB").toUpperCase();
+          const to = String(payload?.to || "USD").toUpperCase();
+          const amount = Number(payload?.amount || 0);
+          const user = appStore.findUserById(userId);
+          if (!user || !Number.isFinite(amount) || amount <= 0 || from === to) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "invalid_convert_data" }));
+            return;
+          }
+
+          if (from === "RUB" && to === "USD") {
+            if (Number(user.balance || 0) < amount) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
+              return;
+            }
+            const usdAmount = Number((amount / Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+            appStore.deductBalance(user.userId, amount);
+            appStore.addUsdBalance(user.userId, usdAmount);
+            appStore.addTransaction({ type: "wallet_convert", userId, from, to, amount, convertedAmount: usdAmount, status: "completed" });
+          } else if (from === "USD" && to === "RUB") {
+            const userUsd = Number(user.usdBalance || Number((Number(user.balance || 0) / Number(USD_TO_RUB_RATE || 30)).toFixed(2)));
+            if (userUsd < amount) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
+              return;
+            }
+            const rubAmount = Number((amount * Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+            appStore.deductUsdBalance(user.userId, amount);
+            appStore.addBalance(user.userId, rubAmount);
+            appStore.addTransaction({ type: "wallet_convert", userId, from, to, amount, convertedAmount: rubAmount, status: "completed" });
+          } else {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "unsupported_convert_pair" }));
+            return;
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (error) {
+          logBotError("http.webapp.convert", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "convert_failed" }));
+        }
+        return;
+      }
       if (req.method === "GET" && requestUrl.pathname === "/webapp/virtual-numbers/apps") {
         const apps = [
           "WhatsApp",
@@ -394,18 +527,42 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
       if (req.method === "GET" && requestUrl.pathname === "/webapp/virtual-numbers/countries") {
         try {
           const appName = String(req.query?.app || "WhatsApp");
-          const [cat1, cat2] = await Promise.all([
-            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server1" }),
-            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server2" }),
+          const serviceCode = getGrizzlyServiceCode(appName);
+          const [p1Raw, p2Raw] = await Promise.all([
+            getServicePrices(serviceCode, "server1", { forceRefresh: true }),
+            getServicePrices(serviceCode, "server2", { forceRefresh: true }),
           ]);
-          const bucket = new Map();
-          [...(cat1.countries || []), ...(cat2.countries || [])].forEach((item) => {
-            const prev = bucket.get(item.id);
-            if (!prev || Number(item.sellPrice) < Number(prev.sellPrice)) {
-              bucket.set(item.id, item);
-            }
-          });
-          const countries = [...bucket.values()].sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice));
+          const map = new Map();
+          const pushFrom = (raw, providerKey) => {
+            Object.entries(raw || {}).forEach(([countryId, entry]) => {
+              const pack = entry?.[serviceCode] && typeof entry[serviceCode] === "object" ? entry[serviceCode] : entry;
+              const supplierPrice = Number(pack?.cost ?? pack?.price);
+              const availableCount = Number(pack?.count ?? pack?.qty ?? pack?.stock ?? 0);
+              if (!Number.isFinite(supplierPrice) || supplierPrice <= 0) return;
+              if (!Number.isFinite(availableCount) || availableCount <= 0) return;
+              const sellPrice = Math.ceil(parseFloat(supplierPrice) * 25 * 1.2);
+              const countryMeta = getGrizzlyCountryMeta(countryId);
+              const countryName = countryMeta?.name_en || countryMeta?.name_ar || `Country ${countryId}`;
+              const previous = map.get(String(countryId)) || {
+                id: String(countryId),
+                name: countryName,
+                name_ar: countryMeta?.name_ar || countryName,
+                flag: countryMeta?.flag || "🌍",
+                options: [],
+                availableCount: 0,
+              };
+              previous.options.push({ providerKey, sellPrice, availableCount });
+              previous.availableCount += Math.max(0, Math.floor(availableCount));
+              map.set(String(countryId), previous);
+            });
+          };
+          pushFrom(p1Raw, "server1");
+          pushFrom(p2Raw, "server2");
+          const countries = [...map.values()].map((c) => ({
+            ...c,
+            options: c.options.sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice)),
+            minSellPrice: c.options.length ? Number(c.options[0].sellPrice) : 0,
+          })).sort((a, b) => Number(a.minSellPrice) - Number(b.minSellPrice));
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, app: appName, countries }));
         } catch (error) {
@@ -446,6 +603,8 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           const userId = Number(payload?.user_id || 0);
           const appName = String(payload?.app || "WhatsApp");
           const countryId = String(payload?.country_id || "");
+          const selectedProvider = String(payload?.provider_key || "").trim();
+          const selectedPrice = Number(payload?.price_rub || 0);
 
           const user = appStore.findUserById(userId);
           if (!user) {
@@ -454,14 +613,21 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             return;
           }
 
+          const serviceCode = getGrizzlyServiceCode(appName);
           const [cat1, cat2] = await Promise.all([
             getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server1" }),
             getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server2" }),
           ]);
-          const options = []
+          let options = []
             .concat(cat1.countries || [], cat2.countries || [])
-            .filter((x) => String(x.id) === countryId)
-            .sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice));
+            .filter((x) => String(x.id) === countryId);
+          if (selectedProvider) {
+            options = options.filter((x) => String(x.providerKey) === selectedProvider);
+          }
+          if (Number.isFinite(selectedPrice) && selectedPrice > 0) {
+            options = options.filter((x) => Number(x.sellPrice) === selectedPrice);
+          }
+          options = options.sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice));
 
           if (!options.length) {
             res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
@@ -477,16 +643,31 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             return;
           }
 
-          const response = await requestNumber(chosen.serviceCode, countryId, chosen.providerKey || "server2");
-          const text = String(response || "").trim();
-          if (!text || !text.includes("ACCESS_NUMBER")) {
+          let acquired = null;
+          for (const option of options) {
+            const response = await requestNumber(serviceCode, countryId, option.providerKey || "server2");
+            const text = String(response || "").trim();
+            if (text && text.includes("ACCESS_NUMBER")) {
+              const [, activationId, number] = text.split(":");
+              acquired = {
+                activationId: String(activationId || ""),
+                number: String(number || ""),
+                providerKey: option.providerKey || "server2",
+                price: Number(option.sellPrice || 0),
+                countryName: option.name_ar || option.name_en || chosen.name_ar || "",
+                flag: option.flag || chosen.flag || "🌍",
+              };
+              break;
+            }
+          }
+
+          if (!acquired) {
             res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
-            res.end(JSON.stringify({ ok: false, error: "provider_no_number", raw: text }));
+            res.end(JSON.stringify({ ok: false, error: "provider_no_number" }));
             return;
           }
 
-          const [, activationId, number] = text.split(":");
-          appStore.deductBalance(user.userId, price);
+          appStore.deductBalance(user.userId, acquired.price);
           appStore.incrementTransactions(user.userId);
           appStore.addTransaction({
             type: "virtual_number_purchase",
@@ -494,10 +675,10 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             serviceKey: "virtual_numbers",
             appName,
             countryId,
-            providerKey: chosen.providerKey || "server2",
-            activationId: String(activationId || ""),
-            number: String(number || ""),
-            amount: price,
+            providerKey: acquired.providerKey,
+            activationId: acquired.activationId,
+            number: acquired.number,
+            amount: acquired.price,
             status: "pending",
           });
 
@@ -507,12 +688,12 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             order: {
               app: appName,
               country_id: countryId,
-              country_name: chosen.name_ar,
-              flag: chosen.flag,
-              provider_key: chosen.providerKey || "server2",
-              activation_id: String(activationId || ""),
-              number: String(number || ""),
-              price_rub: price,
+              country_name: acquired.countryName,
+              flag: acquired.flag,
+              provider_key: acquired.providerKey,
+              activation_id: acquired.activationId,
+              number: acquired.number,
+              price_rub: acquired.price,
             },
           }));
         } catch (error) {

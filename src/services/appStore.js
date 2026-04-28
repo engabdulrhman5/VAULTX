@@ -80,6 +80,7 @@ class AppStore {
       username: user.username || "",
       firstName: user.firstName || "",
       balance: Number(user.balance || 0),
+      usdBalance: Number(user.usdBalance || 0),
       totalDeposits: Number(user.totalDeposits || 0),
       currency: "RUB",
       level: user.level || "Newbie",
@@ -157,6 +158,28 @@ class AppStore {
     }
 
     user.balance = Number((user.balance + Number(amount)).toFixed(2));
+    user.lastSeenAt = new Date().toISOString();
+    this.persistAll();
+    return user;
+  }
+
+  addUsdBalance(userId, amount) {
+    const user = this.findUserById(userId);
+    if (!user) {
+      return null;
+    }
+    user.usdBalance = Number((Number(user.usdBalance || 0) + Number(amount || 0)).toFixed(2));
+    user.lastSeenAt = new Date().toISOString();
+    this.persistAll();
+    return user;
+  }
+
+  deductUsdBalance(userId, amount) {
+    const user = this.findUserById(userId);
+    if (!user) {
+      return null;
+    }
+    user.usdBalance = Number(Math.max(0, Number(user.usdBalance || 0) - Number(amount || 0)).toFixed(2));
     user.lastSeenAt = new Date().toISOString();
     this.persistAll();
     return user;

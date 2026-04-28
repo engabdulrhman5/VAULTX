@@ -20,11 +20,14 @@ function getLevelFromTransactions(count) {
 function buildWebAppUserSnapshot(user) {
   const normalized = user || {};
   const txCount = Number(normalized.transactionsCount || 0);
+  const balanceRub = Number(normalized.balance || 0);
+  const usdBalance = Number(normalized.usdBalance || 0);
   return {
     id: Number(normalized.userId || 0),
     firstName: normalized.firstName || "User",
     username: normalized.username || "",
-    balanceRub: Number(normalized.balance || 0),
+    balanceRub,
+    balanceUsd: Number.isFinite(usdBalance) && usdBalance > 0 ? usdBalance : Number((balanceRub / 30).toFixed(2)),
     level: getLevelFromTransactions(txCount),
     xp: Math.min(100, txCount * 5),
   };
