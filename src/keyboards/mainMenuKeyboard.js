@@ -11,6 +11,23 @@ function getVaultXWebAppUrl() {
 
 
 function getMainMenuKeyboard(lang = "ar") {
+  const L = {
+    virtual_numbers: lang === "ar" ? "📱 الأرقام الوهمية" : "📱 Virtual Numbers",
+    social_boost: lang === "ar" ? "🚀 رشق الحسابات" : "🚀 Social Boost",
+    game_topup: lang === "ar" ? "🎮 شحن الألعاب" : "🎮 Game Top-up",
+    social_accounts: lang === "ar" ? "👥 حسابات سوشيال" : "👥 Social Accounts",
+    pro_accounts: lang === "ar" ? "💎 حسابات Pro" : "💎 Pro Accounts",
+    cloud_services: lang === "ar" ? "☁️ خدمات سحابية" : "☁️ Cloud Services",
+    virtual_visa: lang === "ar" ? "💳 فيزا افتراضية" : "💳 Virtual Visa",
+    temporary_emails: lang === "ar" ? "📧 إيميلات مؤقتة" : "📧 Temporary Emails",
+    other_services: lang === "ar" ? "🧩 خدمات أخرى" : "🧩 Other Services",
+    recharge: lang === "ar" ? "💰 شحن حسابي" : "💰 Recharge",
+    transfer: lang === "ar" ? "🔁 تحويل الرصيد" : "🔁 Transfer",
+    account: lang === "ar" ? "👤 حسابي" : "👤 My Account",
+    referral: lang === "ar" ? "🎁 الإحالة" : "🎁 Referral",
+    settings: lang === "ar" ? "⚙️ الإعدادات" : "⚙️ Settings",
+    support: lang === "ar" ? "🛟 الدعم" : "🛟 Support",
+  };
   const webAppUrl = getVaultXWebAppUrl();
   const webAppRow = webAppUrl
     ? [[{ text: "🚀 VaultX Pro App", web_app: { url: webAppUrl } }]]
@@ -18,32 +35,32 @@ function getMainMenuKeyboard(lang = "ar") {
 
   return {
     inline_keyboard: [
-      [{ text: t(lang, "btn_virtual_numbers"), callback_data: "service:virtual_numbers" }],
+      [{ text: L.virtual_numbers, callback_data: "service:virtual_numbers" }],
       [
-        { text: t(lang, "btn_social_boost"), callback_data: "service:social_boost" },
-        { text: t(lang, "btn_game_topup"), callback_data: "service:game_topup" },
+        { text: L.social_boost, callback_data: "service:social_boost" },
+        { text: L.game_topup, callback_data: "service:game_topup" },
       ],
       [
-        { text: t(lang, "btn_social_accounts"), callback_data: "service:social_accounts" },
-        { text: t(lang, "btn_pro_accounts"), callback_data: "service:pro_accounts" },
+        { text: L.social_accounts, callback_data: "service:social_accounts" },
+        { text: L.pro_accounts, callback_data: "service:pro_accounts" },
       ],
-      [{ text: t(lang, "btn_cloud_services"), callback_data: "service:cloud_services" }],
+      [{ text: L.cloud_services, callback_data: "service:cloud_services" }],
       [
-        { text: t(lang, "btn_virtual_visa"), callback_data: "service:virtual_visa" },
-        { text: t(lang, "btn_temporary_emails"), callback_data: "service:temporary_emails" },
+        { text: L.virtual_visa, callback_data: "service:virtual_visa" },
+        { text: L.temporary_emails, callback_data: "service:temporary_emails" },
       ],
-      [{ text: t(lang, "btn_other_services"), callback_data: "service:other_services" }],
+      [{ text: L.other_services, callback_data: "service:other_services" }],
       [
-        { text: t(lang, "btn_recharge"), callback_data: "service:balance_topup" },
-        { text: t(lang, "btn_transfer"), callback_data: "action:transfer_balance" },
+        { text: L.recharge, callback_data: "service:balance_topup" },
+        { text: L.transfer, callback_data: "action:transfer_balance" },
       ],
-      [{ text: t(lang, "btn_account"), callback_data: "menu:account" }],
+      [{ text: L.account, callback_data: "menu:account" }],
       [
-        { text: t(lang, "btn_referral"), callback_data: "menu:referral" },
-        { text: t(lang, "btn_support"), url: "https://t.me/Engineeer000" },
+        { text: L.referral, callback_data: "menu:referral" },
+        { text: L.support, url: "https://t.me/Engineeer000" },
       ],
       ...webAppRow,
-      [{ text: t(lang, "btn_settings"), callback_data: "menu:settings" }],
+      [{ text: L.settings, callback_data: "menu:settings" }],
     ],
   };
 }

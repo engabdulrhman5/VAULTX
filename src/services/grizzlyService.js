@@ -152,6 +152,31 @@ async function requestProviderWithFailover(providerKey, params, mode = "json") {
   throw lastError || new Error("Provider request failed");
 }
 
+function parseCountriesPayload(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  const out = {};
+  Object.entries(payload).forEach(([id, item]) => {
+    if (item && typeof item === "object") {
+      const label = String(item.name_en || item.name || item.country || item.title || "").trim();
+      if (label) out[String(id)] = label;
+    } else if (typeof item === "string") {
+      const label = item.trim();
+      if (label) out[String(id)] = label;
+    }
+  });
+  return out;
+}
+
+async function getProviderCountries(providerKey = "server2") {
+  try {
+    const data = await requestProviderWithFailover(providerKey, { action: "getCountries" }, "json");
+    return parseCountriesPayload(data);
+  } catch (error) {
+    logBotError("getProviderCountries", error, { providerKey });
+    return {};
+  }
+}
+
 async function getServicePrices(serviceCode, providerKey = "server2", options = {}) {
   try {
     const cacheKey = getCacheKey(providerKey, serviceCode);
@@ -338,4 +363,5 @@ module.exports = {
   calculateVirtualNumberPrice,
   getGrizzlyVirtualNumberCatalog,
   paginateVirtualNumberCountries,
+  getProviderCountries,
 };

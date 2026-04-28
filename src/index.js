@@ -17,6 +17,7 @@ const {
   cancelNumber,
   getGrizzlyVirtualNumberCatalog,
   getServicePrices,
+  getProviderCountries,
 } = require("./services/grizzlyService");
 const { getSmsProvider } = require("./constants/smsProviders");
 const { getGrizzlyServiceCode, getGrizzlyCountryMeta } = require("./constants/grizzly");
@@ -528,12 +529,14 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
         try {
           const appName = String(req.query?.app || "WhatsApp");
           const serviceCode = getGrizzlyServiceCode(appName);
-          const [p1Raw, p2Raw] = await Promise.all([
+          const [p1Raw, p2Raw, p1Countries, p2Countries] = await Promise.all([
             getServicePrices(serviceCode, "server1", { forceRefresh: true }),
             getServicePrices(serviceCode, "server2", { forceRefresh: true }),
+            getProviderCountries("server1"),
+            getProviderCountries("server2"),
           ]);
           const map = new Map();
-          const pushFrom = (raw, providerKey) => {
+          const pushFrom = (raw, providerKey, countriesMap) => {
             Object.entries(raw || {}).forEach(([countryId, entry]) => {
               const pack = entry?.[serviceCode] && typeof entry[serviceCode] === "object" ? entry[serviceCode] : entry;
               const supplierPrice = Number(pack?.cost ?? pack?.price);
@@ -542,7 +545,8 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
               if (!Number.isFinite(availableCount) || availableCount <= 0) return;
               const sellPrice = Math.ceil(parseFloat(supplierPrice) * 25 * 1.2);
               const countryMeta = getGrizzlyCountryMeta(countryId);
-              const countryName = countryMeta?.name_en || countryMeta?.name_ar || `Country ${countryId}`;
+              const providerCountryName = String((countriesMap || {})[String(countryId)] || "").trim();
+              const countryName = providerCountryName || countryMeta?.name_en || countryMeta?.name_ar || `Country ${countryId}`;
               const previous = map.get(String(countryId)) || {
                 id: String(countryId),
                 name: countryName,
@@ -556,8 +560,8 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
               map.set(String(countryId), previous);
             });
           };
-          pushFrom(p1Raw, "server1");
-          pushFrom(p2Raw, "server2");
+          pushFrom(p1Raw, "server1", p1Countries);
+          pushFrom(p2Raw, "server2", p2Countries);
           const countries = [...map.values()].map((c) => ({
             ...c,
             options: c.options.sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice)),
