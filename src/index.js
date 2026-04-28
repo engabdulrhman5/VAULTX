@@ -43,6 +43,7 @@ const {
   handleAddFundsCommand,
   handleSupportCommand,
   handleSettingsCommand,
+  handleAppCommand,
 } = require("./services/commandService");
 const {
   handleGatewayWebAppData,
@@ -969,6 +970,15 @@ bot.on("polling_error", (error) => {
     }
   } catch (innerError) {
     console.error("Fatal polling logger failure:", innerError.message);
+  }
+});
+
+bot.onText(/\/app/, async (msg) => {
+  try {
+    appStore.incrementRequestCount();
+    await handleAppCommand(bot, msg, appStore);
+  } catch (error) {
+    logBotError("bot.onText.app", error, { userId: msg.from?.id });
   }
 });
 

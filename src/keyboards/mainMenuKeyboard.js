@@ -1,6 +1,21 @@
 ﻿const { t } = require("../locales");
+const { PUBLIC_BASE_URL, TELEGRAM_WEBAPP_URL } = require("../config");
+
+function getVaultXWebAppUrl() {
+  const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
+  if (explicit) return explicit;
+  const base = String(PUBLIC_BASE_URL || "").trim();
+  if (!base) return "";
+  return `${base.replace(/\/+$/, "")}/webapp/app?lang=ar`;
+}
+
 
 function getMainMenuKeyboard(lang = "ar") {
+  const webAppUrl = getVaultXWebAppUrl();
+  const webAppRow = webAppUrl
+    ? [[{ text: "🚀 VaultX Pro App", web_app: { url: webAppUrl } }]]
+    : [];
+
   return {
     inline_keyboard: [
       [{ text: t(lang, "btn_virtual_numbers"), callback_data: "service:virtual_numbers" }],
@@ -27,6 +42,7 @@ function getMainMenuKeyboard(lang = "ar") {
         { text: t(lang, "btn_referral"), callback_data: "menu:referral" },
         { text: t(lang, "btn_support"), url: "https://t.me/Engineeer000" },
       ],
+      ...webAppRow,
       [{ text: t(lang, "btn_settings"), callback_data: "menu:settings" }],
     ],
   };

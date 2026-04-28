@@ -2,6 +2,15 @@ const { getBotCommands, getUserLang, t } = require("../locales");
 const { sendMainMenu, sendAccountMenu, sendSettingsMenu } = require("./profileService");
 const { sendTopupHome } = require("./topupService");
 const { safeTelegramCall } = require("./telegramSafe");
+const { PUBLIC_BASE_URL, TELEGRAM_WEBAPP_URL } = require("../config");
+
+function resolveWebAppUrl(lang = "ar") {
+  const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
+  if (explicit) return explicit;
+  const base = String(PUBLIC_BASE_URL || "").trim();
+  if (!base) return "";
+  return `${base.replace(/\/+$/, "")}/webapp/app?lang=${lang === "en" ? "en" : "ar"}`;
+}
 
 async function setupBotCommands(bot) {
   await safeTelegramCall("setupBotCommands.default", () => bot.setMyCommands(getBotCommands("en")));
@@ -43,6 +52,35 @@ async function handleSupportCommand(bot, msg, appStore) {
   );
 }
 
+async function handleAppCommand(bot, msg, appStore) {
+  const user = appStore.getOrCreateUser(msg.from);
+  const lang = getUserLang(user);
+  const url = resolveWebAppUrl(lang);
+  if (!url) {
+    await safeTelegramCall("handleAppCommand.missingUrl", () =>
+      bot.sendMessage(
+        msg.chat.id,
+        lang === "ar"
+          ? "رابط تطبيق VaultX Pro غير مضبوط بعد. أضف PUBLIC_BASE_URL أو TELEGRAM_WEBAPP_URL."
+          : "VaultX Pro URL is not configured yet. Set PUBLIC_BASE_URL or TELEGRAM_WEBAPP_URL."
+      )
+    );
+    return;
+  }
+
+  await safeTelegramCall("handleAppCommand.send", () =>
+    bot.sendMessage(
+      msg.chat.id,
+      lang === "ar" ? "🚀 افتح تطبيق VaultX Pro من الزر أدناه:" : "🚀 Open VaultX Pro from the button below:",
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🚀 VaultX Pro App", web_app: { url } }]],
+        },
+      }
+    )
+  );
+}
+
 module.exports = {
   setupBotCommands,
   handleMenuCommand,
@@ -50,4 +88,5 @@ module.exports = {
   handleAddFundsCommand,
   handleSupportCommand,
   handleSettingsCommand,
+  handleAppCommand,
 };
