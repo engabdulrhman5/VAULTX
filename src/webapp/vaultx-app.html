@@ -102,7 +102,14 @@
       selectedMethod: BOOT.initialMethod || (BOOT.methods[0] ? BOOT.methods[0].key : "binance"),
       user: { ...BOOT.user },
       operations: [],
-      bridgeService: ""
+      bridgeService: "",
+      vn: {
+        apps: [],
+        app: "",
+        countries: [],
+        selectedCountry: null,
+        order: null
+      }
     };
 
     const bigServices = [
@@ -278,6 +285,39 @@
       '</section>';
     }
 
+    function renderVirtualNumbers() {
+      const appButtons = (state.vn.apps || []).map(function(name){
+        const active = state.vn.app === name;
+        return '<button data-vn-app=\"' + name + '\" class=\"px-3 py-2 rounded-xl border text-xs ' + (active ? 'bg-vxblue text-black border-vxblue' : 'bg-white/5 border-vxline') + '\">' + name + '</button>';
+      }).join('');
+
+      const countries = (state.vn.countries || []).slice(0, 60).map(function(c){
+        return '<button data-vn-country=\"' + c.id + '\" class=\"glass rounded-xl p-2 text-start border border-vxline\">' +
+          '<div class=\"text-sm font-bold\">' + escapeHtml(c.flag || '🌍') + ' ' + escapeHtml(c.name_ar || c.id) + '</div>' +
+          '<div class=\"text-[11px] text-vxmuted\">₽ ' + moneyRub(c.sellPrice || 0) + ' • ' + (c.availableCount || 0) + '</div>' +
+        '</button>';
+      }).join('');
+
+      const order = state.vn.order
+        ? '<div class=\"glass rounded-xl p-3 border border-vxline\">' +
+            '<div class=\"font-bold mb-1\">📦 ' + escapeHtml(state.vn.order.app) + '</div>' +
+            '<div class=\"text-sm\">' + escapeHtml(state.vn.order.flag) + ' ' + escapeHtml(state.vn.order.country_name) + '</div>' +
+            '<div class=\"text-sm mt-1\">☎️ <code>' + escapeHtml(state.vn.order.number) + '</code></div>' +
+            '<div class=\"text-sm mt-1\">🛎 <code>' + escapeHtml(state.vn.order.activation_id) + '</code></div>' +
+            '<div class=\"text-sm mt-1\">💰 ₽ ' + moneyRub(state.vn.order.price_rub) + '</div>' +
+            '<button data-action=\"vn-check-code\" class=\"w-full mt-3 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5\">' + (isAr ? 'طلب الكود' : 'Check Code') + '</button>' +
+            '<div id=\"vnCode\" class=\"text-sm mt-2 text-vxmuted\"></div>' +
+          '</div>'
+        : '';
+
+      return '<section class=\"mt-3 space-y-2 slide-up\">' +
+        '<div class=\"glass rounded-2xl p-3 flex items-center justify-between\"><div class=\"font-bold\">📱 ' + t.digital_numbers + '</div><button data-action=\"go-dashboard\" class=\"text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5\">' + t.back + '</button></div>' +
+        '<div class=\"glass rounded-2xl p-3\"><div class=\"text-xs text-vxmuted mb-2\">' + (isAr ? 'اختر التطبيق' : 'Choose app') + '</div><div class=\"flex flex-wrap gap-2\">' + appButtons + '</div></div>' +
+        '<div class=\"glass rounded-2xl p-3\"><div class=\"text-xs text-vxmuted mb-2\">' + (isAr ? 'اختر الدولة' : 'Choose country') + '</div><div class=\"grid grid-cols-2 gap-2 max-h-72 overflow-auto\">' + countries + '</div></div>' +
+        order +
+      '</section>';
+    }
+
     function renderPayments() {
       const tabs = BOOT.methods.map(function(m){
         const active = m.key === state.selectedMethod;
@@ -312,6 +352,7 @@
       if (state.view === "dashboard") html += renderDashboard();
       else if (state.view === "payments") html += renderPayments();
       else if (state.view === "operations") html += renderOperations();
+      else if (state.view === "virtual_numbers") html += renderVirtualNumbers();
       else if (state.view === "bridge") html += renderBridge();
       app.innerHTML = html;
       bindEvents();
@@ -332,6 +373,11 @@
     }
 
     function openServiceFromCard(key) {
+      if (key === "digital_numbers") {
+        state.view = "virtual_numbers";
+        render();
+        return;
+      }
       if (key === "payments") {
         state.view = "payments";
         render();
@@ -372,6 +418,27 @@
       document.querySelectorAll('[data-action="go-dashboard"]').forEach(function(btn){
         btn.onclick = function(){ state.view = 'dashboard'; render(); };
       });
+      document.querySelectorAll('[data-vn-app]').forEach(function(btn){
+        btn.onclick = async function() {
+          state.vn.app = btn.dataset.vnApp;
+          await loadVirtualCountries(state.vn.app);
+          render();
+        };
+      });
+      document.querySelectorAll('[data-vn-country]').forEach(function(btn){
+        btn.onclick = async function() {
+          const c = (state.vn.countries || []).find(function(x){ return String(x.id) === String(btn.dataset.vnCountry); });
+          if (!c || !state.vn.app) return;
+          await buyVirtualNumber(state.vn.app, c.id);
+          render();
+        };
+      });
+      const vnCheck = document.querySelector('[data-action="vn-check-code"]');
+      if (vnCheck) {
+        vnCheck.onclick = async function() {
+          await checkVirtualCode();
+        };
+      }
       const bridgeSend = document.querySelector('[data-action="bridge-send"]');
       if (bridgeSend) {
         bridgeSend.onclick = function() {
@@ -427,9 +494,84 @@
     }
 
     async function boot() {
+      await loadVirtualApps();
+      if ((state.vn.apps || []).length) {
+        state.vn.app = state.vn.apps[0];
+        await loadVirtualCountries(state.vn.app);
+      }
       await refreshProfile();
       await loadOperations();
       render();
+    }
+
+    async function loadVirtualApps() {
+      try {
+        const res = await fetch('/webapp/virtual-numbers/apps', { cache: 'no-store' });
+        const data = await res.json();
+        state.vn.apps = Array.isArray(data?.apps) ? data.apps : [];
+      } catch (_) {
+        state.vn.apps = [];
+      }
+    }
+
+    async function loadVirtualCountries(app) {
+      try {
+        const res = await fetch('/webapp/virtual-numbers/countries?app=' + encodeURIComponent(app), { cache: 'no-store' });
+        const data = await res.json();
+        state.vn.countries = Array.isArray(data?.countries) ? data.countries : [];
+      } catch (_) {
+        state.vn.countries = [];
+      }
+    }
+
+    async function buyVirtualNumber(app, countryId) {
+      try {
+        const res = await fetch('/webapp/virtual-numbers/buy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: getTelegramUserId(), app: app, country_id: countryId })
+        });
+        const data = await res.json();
+        if (!data?.ok) {
+          if (data?.error === 'insufficient_balance') {
+            showToast(isAr ? 'الرصيد غير كافي' : 'Insufficient balance', false);
+          } else {
+            showToast(isAr ? 'لا يوجد أرقام حاليا' : 'No numbers available now', false);
+          }
+          return;
+        }
+        state.vn.order = data.order;
+        await refreshProfile();
+        await loadOperations();
+        showToast(isAr ? 'تم شراء الرقم بنجاح' : 'Number purchased successfully', true);
+      } catch (_) {
+        showToast(isAr ? 'فشل الشراء' : 'Purchase failed', false);
+      }
+    }
+
+    async function checkVirtualCode() {
+      if (!state.vn.order) return;
+      try {
+        const res = await fetch('/webapp/virtual-numbers/status?activation_id=' + encodeURIComponent(state.vn.order.activation_id) + '&provider_key=' + encodeURIComponent(state.vn.order.provider_key), { cache: 'no-store' });
+        const data = await res.json();
+        const box = document.getElementById('vnCode');
+        if (!box) return;
+        if (!data?.ok) {
+          box.textContent = isAr ? 'تعذر جلب الحالة' : 'Failed to fetch status';
+          return;
+        }
+        if (data.status === 'received') {
+          box.textContent = (isAr ? '✅ الكود: ' : '✅ Code: ') + String(data.code || '-');
+          showToast(isAr ? 'وصل الكود' : 'Code received', true);
+        } else if (data.status === 'pending') {
+          box.textContent = isAr ? '⏳ قيد الانتظار...' : '⏳ Waiting...';
+        } else {
+          box.textContent = isAr ? '⚠️ الحالة غير متاحة' : '⚠️ Status unavailable';
+        }
+      } catch (_) {
+        const box = document.getElementById('vnCode');
+        if (box) box.textContent = isAr ? 'تعذر جلب الحالة' : 'Failed to fetch status';
+      }
     }
 
     document.addEventListener('visibilitychange', function(){

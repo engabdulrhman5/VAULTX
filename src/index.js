@@ -11,7 +11,12 @@ const { AppStore } = require("./services/appStore");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
 const { isNetworkPermissionError } = require("./utils/network");
-const { requestNumber, getSmsStatus, cancelNumber } = require("./services/grizzlyService");
+const {
+  requestNumber,
+  getSmsStatus,
+  cancelNumber,
+  getGrizzlyVirtualNumberCatalog,
+} = require("./services/grizzlyService");
 const { getSmsProvider } = require("./constants/smsProviders");
 const { t, getUserLang } = require("./locales");
 const {
@@ -317,6 +322,24 @@ async function handleCryptomusWebhookEvent(rawBody, parsedPayload) {
 
 const renderPort = Number(process.env.PORT || 0);
 if (Number.isFinite(renderPort) && renderPort > 0) {
+  const readJsonBody = (req) => new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 2 * 1024 * 1024) {
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+
   http.createServer(async (req, res) => {
     try {
       const requestUrl = new URL(req.url || "/", "http://localhost");
@@ -349,6 +372,154 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
         const transactions = getWebAppTransactions(appStore, userId, limit);
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, transactions }));
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/virtual-numbers/apps") {
+        const apps = [
+          "WhatsApp",
+          "Telegram",
+          "Instagram",
+          "Facebook",
+          "Twitter",
+          "TikTok",
+          "Google",
+          "Snapchat",
+          "Viber",
+          "Discord",
+        ];
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, apps }));
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/virtual-numbers/countries") {
+        try {
+          const appName = String(req.query?.app || "WhatsApp");
+          const [cat1, cat2] = await Promise.all([
+            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server1" }),
+            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server2" }),
+          ]);
+          const bucket = new Map();
+          [...(cat1.countries || []), ...(cat2.countries || [])].forEach((item) => {
+            const prev = bucket.get(item.id);
+            if (!prev || Number(item.sellPrice) < Number(prev.sellPrice)) {
+              bucket.set(item.id, item);
+            }
+          });
+          const countries = [...bucket.values()].sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice));
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, app: appName, countries }));
+        } catch (error) {
+          logBotError("http.webapp.vn.countries", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "failed_to_load_countries" }));
+        }
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/virtual-numbers/status") {
+        try {
+          const activationId = String(req.query?.activation_id || "");
+          const providerKey = String(req.query?.provider_key || "server2");
+          const statusRaw = await getSmsStatus(activationId, providerKey);
+          const statusText = String(statusRaw || "").trim();
+          let status = "pending";
+          let code = "";
+          if (statusText.startsWith("STATUS_OK")) {
+            status = "received";
+            code = String(statusText.split(":")[1] || "");
+          } else if (statusText.startsWith("STATUS_CANCEL")) {
+            status = "cancelled";
+          } else if (!statusText || statusText.startsWith("ERROR")) {
+            status = "error";
+          }
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, status, code, raw: statusText }));
+        } catch (error) {
+          logBotError("http.webapp.vn.status", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "status_failed" }));
+        }
+        return;
+      }
+      if (req.method === "POST" && requestUrl.pathname === "/webapp/virtual-numbers/buy") {
+        try {
+          const payload = await readJsonBody(req);
+          const userId = Number(payload?.user_id || 0);
+          const appName = String(payload?.app || "WhatsApp");
+          const countryId = String(payload?.country_id || "");
+
+          const user = appStore.findUserById(userId);
+          if (!user) {
+            res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "user_not_found" }));
+            return;
+          }
+
+          const [cat1, cat2] = await Promise.all([
+            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server1" }),
+            getGrizzlyVirtualNumberCatalog(appName, { providerKey: "server2" }),
+          ]);
+          const options = []
+            .concat(cat1.countries || [], cat2.countries || [])
+            .filter((x) => String(x.id) === countryId)
+            .sort((a, b) => Number(a.sellPrice) - Number(b.sellPrice));
+
+          if (!options.length) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "country_not_available" }));
+            return;
+          }
+
+          const chosen = options[0];
+          const price = Number(chosen.sellPrice || 0);
+          if (!Number.isFinite(price) || price <= 0 || Number(user.balance || 0) < price) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "insufficient_balance", need: price, balance: Number(user.balance || 0) }));
+            return;
+          }
+
+          const response = await requestNumber(chosen.serviceCode, countryId, chosen.providerKey || "server2");
+          const text = String(response || "").trim();
+          if (!text || !text.includes("ACCESS_NUMBER")) {
+            res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_no_number", raw: text }));
+            return;
+          }
+
+          const [, activationId, number] = text.split(":");
+          appStore.deductBalance(user.userId, price);
+          appStore.incrementTransactions(user.userId);
+          appStore.addTransaction({
+            type: "virtual_number_purchase",
+            userId: user.userId,
+            serviceKey: "virtual_numbers",
+            appName,
+            countryId,
+            providerKey: chosen.providerKey || "server2",
+            activationId: String(activationId || ""),
+            number: String(number || ""),
+            amount: price,
+            status: "pending",
+          });
+
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({
+            ok: true,
+            order: {
+              app: appName,
+              country_id: countryId,
+              country_name: chosen.name_ar,
+              flag: chosen.flag,
+              provider_key: chosen.providerKey || "server2",
+              activation_id: String(activationId || ""),
+              number: String(number || ""),
+              price_rub: price,
+            },
+          }));
+        } catch (error) {
+          logBotError("http.webapp.vn.buy", error);
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "buy_failed" }));
+        }
         return;
       }
 
