@@ -66,6 +66,10 @@
       wallet: isAr ? "الرصيد" : "Balance",
       level: isAr ? "المستوى" : "Level",
       operations: isAr ? "عمليّاتي" : "My Operations",
+      bridgeTitle: isAr ? "متابعة الخدمة" : "Service Handoff",
+      bridgeBody: isAr ? "تم تجهيز مسار الخدمة داخل البوت. يمكنك المتابعة من الرسالة التي ستظهر في المحادثة." : "Service flow is prepared in the bot chat. Continue from the message that appears there.",
+      bridgeOpen: isAr ? "فتح المسار في البوت" : "Open in Bot Chat",
+      closeApp: isAr ? "إغلاق التطبيق" : "Close App",
       openInTelegram: isAr ? "هذه الوظيفة تعمل داخل تيليجرام" : "This action works inside Telegram",
       loading: isAr ? "جاري التحميل..." : "Loading...",
       processing: isAr ? "جارٍ التنفيذ..." : "Processing...",
@@ -97,7 +101,8 @@
       view: BOOT.initialScreen === "payment" ? "payments" : "dashboard",
       selectedMethod: BOOT.initialMethod || (BOOT.methods[0] ? BOOT.methods[0].key : "binance"),
       user: { ...BOOT.user },
-      operations: []
+      operations: [],
+      bridgeService: ""
     };
 
     const bigServices = [
@@ -258,6 +263,21 @@
       '</section>';
     }
 
+    function renderBridge() {
+      return '<section class="mt-3 space-y-2 slide-up">' +
+        '<div class="glass rounded-2xl p-3 flex items-center justify-between">' +
+          '<div class="font-bold">' + t.bridgeTitle + '</div>' +
+          '<button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">' + t.back + '</button>' +
+        '</div>' +
+        '<div class="glass rounded-2xl p-4 text-sm leading-7">' +
+          '<div class="font-semibold mb-2">📌 ' + (t[state.bridgeService] || state.bridgeService) + '</div>' +
+          '<div class="text-vxmuted">' + t.bridgeBody + '</div>' +
+          '<button data-action="bridge-send" class="w-full mt-4 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">' + t.bridgeOpen + '</button>' +
+          '<button data-action="bridge-close" class="w-full mt-2 rounded-xl bg-white/5 border border-vxline text-vxtxt font-bold py-2.5">' + t.closeApp + '</button>' +
+        '</div>' +
+      '</section>';
+    }
+
     function renderPayments() {
       const tabs = BOOT.methods.map(function(m){
         const active = m.key === state.selectedMethod;
@@ -292,6 +312,7 @@
       if (state.view === "dashboard") html += renderDashboard();
       else if (state.view === "payments") html += renderPayments();
       else if (state.view === "operations") html += renderOperations();
+      else if (state.view === "bridge") html += renderBridge();
       app.innerHTML = html;
       bindEvents();
       refreshPaymentPreview();
@@ -323,8 +344,9 @@
       }
       const ok = sendAction("open_service:" + key, { source: "vaultx_super_app" });
       if (ok) {
-        showToast(t.loading, true);
-        setTimeout(function(){ if (tg) tg.close(); }, 250);
+        state.bridgeService = key;
+        state.view = "bridge";
+        render();
       } else {
         showToast(t.openInTelegram, false);
       }
@@ -350,6 +372,17 @@
       document.querySelectorAll('[data-action="go-dashboard"]').forEach(function(btn){
         btn.onclick = function(){ state.view = 'dashboard'; render(); };
       });
+      const bridgeSend = document.querySelector('[data-action="bridge-send"]');
+      if (bridgeSend) {
+        bridgeSend.onclick = function() {
+          const ok = sendAction("open_service:" + state.bridgeService, { source: "vaultx_super_app_bridge" });
+          showToast(ok ? t.loading : t.openInTelegram, ok);
+        };
+      }
+      const bridgeClose = document.querySelector('[data-action="bridge-close"]');
+      if (bridgeClose) {
+        bridgeClose.onclick = function() { if (tg) tg.close(); };
+      }
 
       document.querySelectorAll('[data-method]').forEach(function(btn){
         btn.onclick = function(){ state.selectedMethod = btn.dataset.method; state.view = 'payments'; render(); };
