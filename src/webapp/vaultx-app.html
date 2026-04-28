@@ -78,6 +78,12 @@
       game_topup: isAr ? "شحن الألعاب" : "Gaming Top-up",
       pro_accounts: isAr ? "حسابات Pro" : "Pro Accounts",
       cloud_services: isAr ? "الخدمات السحابية" : "Cloud Services",
+      social_accounts: isAr ? "حسابات سوشيال" : "Social Accounts",
+      temporary_emails: isAr ? "إيميلات مؤقتة" : "Temporary Emails",
+      virtual_visa: isAr ? "فيزا افتراضية" : "Virtual Visa",
+      other_services: isAr ? "خدمات أخرى" : "Other Services",
+      account: isAr ? "حسابي" : "My Account",
+      referral: isAr ? "الإحالة" : "Referral",
       back: isAr ? "رجوع" : "Back",
       copy: isAr ? "نسخ" : "Copy",
       copied: isAr ? "تم النسخ" : "Copied",
@@ -92,7 +98,14 @@
       { key: "social_boost", icon: "🚀", color: "from-violet-500/25 to-fuchsia-400/10" },
       { key: "game_topup", icon: "🎮", color: "from-emerald-500/25 to-lime-400/10" },
       { key: "pro_accounts", icon: "💎", color: "from-amber-500/25 to-yellow-400/10" },
+      { key: "social_accounts", icon: "👥", color: "from-pink-500/25 to-rose-400/10" },
       { key: "cloud_services", icon: "☁️", color: "from-indigo-500/25 to-sky-400/10" },
+      { key: "temporary_emails", icon: "📧", color: "from-cyan-500/25 to-blue-400/10" },
+      { key: "virtual_visa", icon: "💳", color: "from-slate-500/25 to-zinc-400/10" },
+      { key: "other_services", icon: "🧩", color: "from-purple-500/25 to-indigo-400/10" },
+      { key: "account", icon: "👤", color: "from-green-500/25 to-teal-400/10" },
+      { key: "referral", icon: "🎁", color: "from-orange-500/25 to-amber-400/10" },
+      { key: "settings", icon: "⚙️", color: "from-gray-500/25 to-slate-400/10" },
       { key: "payments", icon: "💳", color: "from-teal-500/25 to-cyan-400/10" },
     ];
 
@@ -276,7 +289,7 @@
 
     function render() {
       const app = document.getElementById('app');
-      let body = renderHeader();
+      let body = state.view === 'dashboard' ? renderHeader() : '';
       if (state.view === 'dashboard') body += renderDashboard();
       else if (state.view === 'payments') body += renderPayments();
       else body += renderServiceForm(state.view);
@@ -308,7 +321,17 @@
 
     function bindEvents() {
       document.querySelectorAll('[data-service]').forEach(function(btn){
-        btn.onclick = function(){ state.view = btn.dataset.service; render(); };
+        btn.onclick = function(){
+          const key = btn.dataset.service;
+          if (key === 'payments') {
+            state.view = 'payments';
+            render();
+            return;
+          }
+          sendAction('open_service:' + key, { source: 'vaultx_webapp_card' });
+          showToast(t.success, true);
+          if (tg) setTimeout(function(){ tg.close(); }, 320);
+        };
       });
       document.querySelectorAll('[data-action="go-dashboard"]').forEach(function(btn){
         btn.onclick = function(){ state.view = 'dashboard'; render(); };
