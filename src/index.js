@@ -53,7 +53,11 @@ const {
   startBinanceEmailWatcher,
 } = require("./services/topupVerificationService");
 const { handleVaultXWebAppData } = require("./services/webAppBridgeService");
-const { renderVaultXWebAppPage } = require("./services/webAppUiService");
+const {
+  renderVaultXWebAppPage,
+  getWebAppProfile,
+  getWebAppTransactions,
+} = require("./services/webAppUiService");
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
@@ -330,6 +334,21 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
       }
       if (req.method === "GET" && requestUrl.pathname === "/webapp/app") {
         renderVaultXWebAppPage(req, res, appStore);
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/profile") {
+        const userId = Number(req.query?.user_id || 0);
+        const profile = getWebAppProfile(appStore, userId);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, profile }));
+        return;
+      }
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/transactions") {
+        const userId = Number(req.query?.user_id || 0);
+        const limit = Number(req.query?.limit || 10);
+        const transactions = getWebAppTransactions(appStore, userId, limit);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, transactions }));
         return;
       }
 

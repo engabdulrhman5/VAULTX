@@ -45,11 +45,9 @@
       -webkit-backdrop-filter: blur(12px);
     }
     .fade-in { animation: fadeIn .25s ease; }
-    .slide-up { animation: slideUp .32s cubic-bezier(.2,.8,.2,1); }
-    .pulse-ok { animation: pulseOk .9s ease; }
+    .slide-up { animation: slideUp .30s cubic-bezier(.2,.8,.2,1); }
     @keyframes fadeIn { from {opacity:.2} to {opacity:1} }
-    @keyframes slideUp { from {opacity:.1; transform: translateY(12px)} to {opacity:1; transform: translateY(0)} }
-    @keyframes pulseOk { 0% { transform: scale(1);} 35% { transform: scale(1.03);} 100% { transform: scale(1);} }
+    @keyframes slideUp { from {opacity:.1; transform: translateY(10px)} to {opacity:1; transform: translateY(0)} }
     .loader { width:18px;height:18px;border-radius:999px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg);} }
   </style>
@@ -65,25 +63,14 @@
     const isAr = BOOT.lang === "ar";
     const t = {
       appTitle: "VaultX Pro",
-      wallet: isAr ? "رصيد المحفظة" : "Wallet",
+      wallet: isAr ? "الرصيد" : "Balance",
       level: isAr ? "المستوى" : "Level",
-      settings: isAr ? "الإعدادات" : "Settings",
-      submit: isAr ? "تنفيذ الآن" : "Submit",
+      operations: isAr ? "عمليّاتي" : "My Operations",
+      openInTelegram: isAr ? "هذه الوظيفة تعمل داخل تيليجرام" : "This action works inside Telegram",
+      loading: isAr ? "جاري التحميل..." : "Loading...",
       processing: isAr ? "جارٍ التنفيذ..." : "Processing...",
-      success: isAr ? "تم إرسال الطلب بنجاح" : "Request sent successfully",
-      paymentCenter: isAr ? "مركز الدفع" : "Payment Center",
-      serviceHub: isAr ? "الخدمات" : "Services",
-      digital_numbers: isAr ? "الأرقام الوهمية" : "Digital Numbers",
-      social_boost: isAr ? "رشق الحسابات" : "Social Media SMM",
-      game_topup: isAr ? "شحن الألعاب" : "Gaming Top-up",
-      pro_accounts: isAr ? "حسابات Pro" : "Pro Accounts",
-      cloud_services: isAr ? "الخدمات السحابية" : "Cloud Services",
-      social_accounts: isAr ? "حسابات سوشيال" : "Social Accounts",
-      temporary_emails: isAr ? "إيميلات مؤقتة" : "Temporary Emails",
-      virtual_visa: isAr ? "فيزا افتراضية" : "Virtual Visa",
-      other_services: isAr ? "خدمات أخرى" : "Other Services",
-      account: isAr ? "حسابي" : "My Account",
-      referral: isAr ? "الإحالة" : "Referral",
+      paymentCenter: isAr ? "شحن الحساب" : "Top Up",
+      serviceHub: isAr ? "الخدمة" : "Service",
       back: isAr ? "رجوع" : "Back",
       copy: isAr ? "نسخ" : "Copy",
       copied: isAr ? "تم النسخ" : "Copied",
@@ -91,9 +78,29 @@
       amount: isAr ? "المبلغ" : "Amount",
       payConfirm: isAr ? "تأكيد الدفع" : "Confirm Payment",
       converter: isAr ? "الرصيد المتوقع" : "Expected Credit",
+      emptyOps: isAr ? "لا توجد عمليات بعد" : "No operations yet",
+      digital_numbers: isAr ? "الأرقام الوهمية" : "Virtual Numbers",
+      social_boost: isAr ? "رشق الحسابات" : "SMM Boost",
+      game_topup: isAr ? "شحن الألعاب" : "Game Top-up",
+      pro_accounts: isAr ? "حسابات Pro" : "Pro Accounts",
+      social_accounts: isAr ? "حسابات سوشيال" : "Social Accounts",
+      cloud_services: isAr ? "الخدمات السحابية" : "Cloud Services",
+      temporary_emails: isAr ? "إيميلات مؤقتة" : "Temporary Emails",
+      virtual_visa: isAr ? "فيزا افتراضية" : "Virtual Visa",
+      other_services: isAr ? "خدمات أخرى" : "Other Services",
+      account: isAr ? "حسابي" : "My Account",
+      referral: isAr ? "الإحالة" : "Referral",
+      settings: isAr ? "الإعدادات" : "Settings"
     };
 
-    const services = [
+    const state = {
+      view: BOOT.initialScreen === "payment" ? "payments" : "dashboard",
+      selectedMethod: BOOT.initialMethod || (BOOT.methods[0] ? BOOT.methods[0].key : "binance"),
+      user: { ...BOOT.user },
+      operations: []
+    };
+
+    const bigServices = [
       { key: "digital_numbers", icon: "📱", color: "from-blue-500/25 to-cyan-400/10" },
       { key: "social_boost", icon: "🚀", color: "from-violet-500/25 to-fuchsia-400/10" },
       { key: "game_topup", icon: "🎮", color: "from-emerald-500/25 to-lime-400/10" },
@@ -103,47 +110,19 @@
       { key: "temporary_emails", icon: "📧", color: "from-cyan-500/25 to-blue-400/10" },
       { key: "virtual_visa", icon: "💳", color: "from-slate-500/25 to-zinc-400/10" },
       { key: "other_services", icon: "🧩", color: "from-purple-500/25 to-indigo-400/10" },
-      { key: "account", icon: "👤", color: "from-green-500/25 to-teal-400/10" },
-      { key: "referral", icon: "🎁", color: "from-orange-500/25 to-amber-400/10" },
-      { key: "settings", icon: "⚙️", color: "from-gray-500/25 to-slate-400/10" },
-      { key: "payments", icon: "💳", color: "from-teal-500/25 to-cyan-400/10" },
+      { key: "payments", icon: "💰", color: "from-teal-500/25 to-cyan-400/10" }
     ];
 
-    const formSchemas = {
-      digital_numbers: [
-        { id: "app", label: isAr ? "التطبيق" : "App", type: "select", options: ["WhatsApp", "Telegram", "Instagram", "Facebook"] },
-        { id: "country", label: isAr ? "الدولة" : "Country", type: "text", placeholder: isAr ? "مثال: مصر" : "e.g. Egypt" },
-        { id: "category", label: isAr ? "الفئة/السعر" : "Category/Price", type: "text", placeholder: isAr ? "مثال: VIP" : "e.g. VIP" }
-      ],
-      social_boost: [
-        { id: "platform", label: isAr ? "المنصة" : "Platform", type: "select", options: ["Instagram", "TikTok", "Telegram", "YouTube"] },
-        { id: "service", label: isAr ? "نوع الخدمة" : "Service type", type: "text", placeholder: isAr ? "مثال: متابعين" : "e.g. Followers" },
-        { id: "target", label: isAr ? "الرابط/المعرف" : "Link/Username", type: "text", placeholder: "https://..." },
-        { id: "quantity", label: isAr ? "الكمية" : "Quantity", type: "number", placeholder: "1000" }
-      ],
-      game_topup: [
-        { id: "game", label: isAr ? "اللعبة" : "Game", type: "text", placeholder: isAr ? "مثال: PUBG" : "e.g. PUBG" },
-        { id: "player_id", label: isAr ? "آيدي اللاعب" : "Player ID", type: "text", placeholder: "123456789" },
-        { id: "package", label: isAr ? "الباقة" : "Package", type: "text", placeholder: isAr ? "مثال: 660 UC" : "e.g. 660 UC" }
-      ],
-      pro_accounts: [
-        { id: "category", label: isAr ? "الفئة" : "Category", type: "select", options: ["AI Tools", "Entertainment", "Design", "Verification"] },
-        { id: "app", label: isAr ? "التطبيق" : "App", type: "text", placeholder: "ChatGPT / Netflix / ..." },
-        { id: "plan", label: isAr ? "الخطة" : "Plan", type: "text", placeholder: "Plus / Premium" },
-        { id: "duration", label: isAr ? "المدة" : "Duration", type: "text", placeholder: isAr ? "شهر واحد" : "1 Month" },
-        { id: "method", label: isAr ? "طريقة التفعيل" : "Activation", type: "select", options: [isAr ? "على حسابي" : "My Account", isAr ? "حساب جديد" : "New Account"] }
-      ],
-      cloud_services: [
-        { id: "type", label: isAr ? "نوع الخدمة" : "Type", type: "select", options: ["VPS", "Domain", "Web Hosting", "VPN"] },
-        { id: "spec", label: isAr ? "المواصفات" : "Specification", type: "text", placeholder: isAr ? "2GB RAM | 2 vCPU" : "2GB RAM | 2 vCPU" },
-        { id: "duration", label: isAr ? "المدة" : "Duration", type: "text", placeholder: isAr ? "شهر" : "1 Month" }
-      ]
-    };
+    const topActions = [
+      { key: "account", icon: "👤" },
+      { key: "referral", icon: "🎁" },
+      { key: "operations", icon: "🧾" },
+      { key: "settings", icon: "⚙️" }
+    ];
 
-    const state = {
-      view: BOOT.initialScreen === "payment" ? "payments" : "dashboard",
-      selectedMethod: BOOT.initialMethod || (BOOT.methods[0] ? BOOT.methods[0].key : "binance")
-    };
+    function escapeHtml(v) {
+      return String(v || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
     function moneyRub(v) {
       const n = Number(v || 0);
@@ -160,88 +139,123 @@
       return val / p;
     }
 
+    function getTelegramUserId() {
+      return Number(tg?.initDataUnsafe?.user?.id || state.user.id || 0);
+    }
+
+    async function refreshProfile() {
+      const uid = getTelegramUserId();
+      if (!uid) return;
+      try {
+        const res = await fetch(`/webapp/profile?user_id=${uid}`, { cache: "no-store" });
+        const data = await res.json();
+        if (data?.ok && data.profile) {
+          state.user = { ...state.user, ...data.profile };
+          if (state.view === "dashboard") render();
+        }
+      } catch (_) {}
+    }
+
+    async function loadOperations() {
+      const uid = getTelegramUserId();
+      if (!uid) return;
+      try {
+        const res = await fetch(`/webapp/transactions?user_id=${uid}&limit=20`, { cache: "no-store" });
+        const data = await res.json();
+        state.operations = Array.isArray(data?.transactions) ? data.transactions : [];
+      } catch (_) {
+        state.operations = [];
+      }
+    }
+
     function sendAction(action, details) {
       const payload = {
         type: "vaultx_webapp_request",
-        action: action,
-        details: details,
-        user_id: BOOT.user.id,
+        action,
+        details,
+        user_id: getTelegramUserId(),
         ts: Date.now()
       };
-      if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
+      if (tg && tg.sendData) {
+        tg.sendData(JSON.stringify(payload));
+        return true;
+      }
+      return false;
     }
 
     function sendGateway(method, amountLocal, txId) {
       const payload = {
         type: "gateway_topup",
-        method: method,
+        method,
         amount_local: Number(amountLocal),
         tx_id: String(txId || "").trim(),
-        user_id: BOOT.user.id
+        user_id: getTelegramUserId()
       };
-      if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
+      if (tg && tg.sendData) {
+        tg.sendData(JSON.stringify(payload));
+        return true;
+      }
+      return false;
     }
 
-    function cardStat(title, value, badge) {
-      return '<div class="glass rounded-2xl p-3 shadow-card slide-up">' +
-        '<div class="text-vxmuted text-xs">' + title + '</div>' +
-        '<div class="flex items-center justify-between mt-1">' +
-          '<div class="text-sm font-bold">' + value + '</div>' +
-          '<div class="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-vxgold">' + badge + '</div>' +
-        '</div>' +
-      '</div>';
+    function showToast(text, ok) {
+      const toast = document.createElement("div");
+      toast.className = "fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm " + (ok ? "bg-emerald-500/20 border-emerald-400/40" : "bg-rose-500/20 border-rose-400/40");
+      toast.textContent = text;
+      document.body.appendChild(toast);
+      setTimeout(function(){ toast.remove(); }, 1600);
     }
 
-    function renderHeader() {
-      return '<header class="glass rounded-2xl p-3 mb-3 shadow-card fade-in">' +
+    function renderTopBar() {
+      const actions = topActions.map(function(a){
+        return '<button data-top="' + a.key + '" class="glass rounded-xl px-3 py-2 text-xs font-semibold">' + a.icon + ' ' + (a.key === 'operations' ? t.operations : t[a.key]) + '</button>';
+      }).join("");
+      return '<header class="glass rounded-2xl p-3 shadow-card fade-in">' +
         '<div class="flex items-center justify-between">' +
           '<div>' +
             '<div class="text-sm font-extrabold tracking-wide">' + t.appTitle + '</div>' +
-            '<div class="text-[11px] text-vxmuted">@' + (BOOT.user.username || 'vaultx_user') + '</div>' +
+            '<div class="text-[11px] text-vxmuted">@' + escapeHtml(state.user.username || "vaultx_user") + '</div>' +
           '</div>' +
-          '<button class="w-9 h-9 rounded-xl border border-vxline bg-white/5 text-lg" data-action="open-settings">⚙️</button>' +
+          '<div class="text-[11px] px-2 py-1 rounded-lg border border-vxline bg-white/5">ID: ' + (state.user.id || 0) + '</div>' +
         '</div>' +
         '<div class="grid grid-cols-2 gap-2 mt-3">' +
-          cardStat(t.wallet, moneyRub(BOOT.user.balanceRub) + ' RUB', 'RUB') +
-          cardStat(t.level, BOOT.user.level, BOOT.user.xp + '% XP') +
+          '<div class="glass rounded-xl p-2"><div class="text-vxmuted text-[11px]">' + t.wallet + '</div><div class="font-bold text-sm">' + moneyRub(state.user.balanceRub) + ' RUB</div></div>' +
+          '<div class="glass rounded-xl p-2"><div class="text-vxmuted text-[11px]">' + t.level + '</div><div class="font-bold text-sm">' + escapeHtml(state.user.level || "Newbie") + '</div></div>' +
         '</div>' +
+        '<div class="grid grid-cols-4 gap-2 mt-3">' + actions + '</div>' +
       '</header>';
     }
 
     function renderDashboard() {
-      const cards = services.map(function(s){
-        return '<button data-service="' + s.key + '" class="glass rounded-2xl p-3 text-start shadow-card bg-gradient-to-br ' + s.color + ' border border-vxline hover:border-vxblue/40 transition slide-up">' +
+      const cards = bigServices.map(function(s){
+        return '<button data-service="' + s.key + '" class="glass rounded-2xl p-4 text-start shadow-card bg-gradient-to-br ' + s.color + ' border border-vxline hover:border-vxblue/40 transition slide-up">' +
           '<div class="text-2xl">' + s.icon + '</div>' +
-          '<div class="text-sm mt-1 font-bold">' + (t[s.key] || s.key) + '</div>' +
-          '<div class="text-[11px] text-vxmuted mt-0.5">' + (s.key === 'payments' ? t.paymentCenter : t.serviceHub) + '</div>' +
+          '<div class="text-sm mt-1 font-bold">' + t[s.key] + '</div>' +
+          '<div class="text-[11px] text-vxmuted mt-0.5">' + (s.key === "payments" ? t.paymentCenter : t.serviceHub) + '</div>' +
         '</button>';
-      }).join('');
-      return '<div class="grid grid-cols-2 gap-2">' + cards + '</div>';
+      }).join("");
+      return '<section class="mt-3 grid grid-cols-2 gap-2">' + cards + '</section>';
     }
 
-    function renderField(field) {
-      if (field.type === 'select') {
-        return '<label class="text-xs text-vxmuted">' + field.label + '</label>' +
-          '<select name="' + field.id + '" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow">' +
-            field.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
-          '</select>';
-      }
-      return '<label class="text-xs text-vxmuted">' + field.label + '</label>' +
-        '<input name="' + field.id + '" type="' + (field.type || 'text') + '" placeholder="' + (field.placeholder || '') + '" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" />';
-    }
+    function renderOperations() {
+      const rows = state.operations.length
+        ? state.operations.map(function(tx){
+            return '<div class="glass rounded-xl p-3 border border-vxline">' +
+              '<div class="flex items-center justify-between gap-2">' +
+                '<div class="text-xs text-vxmuted">' + escapeHtml(tx.type || tx.serviceKey || "transaction") + '</div>' +
+                '<div class="text-xs">' + moneyRub(tx.amount || 0) + ' RUB</div>' +
+              '</div>' +
+              '<div class="text-[11px] text-vxmuted mt-1">' + escapeHtml(tx.createdAt || "") + '</div>' +
+            '</div>';
+          }).join("")
+        : '<div class="glass rounded-xl p-4 text-sm text-vxmuted">' + t.emptyOps + '</div>';
 
-    function renderServiceForm(serviceKey) {
-      const schema = formSchemas[serviceKey] || [];
-      return '<div class="glass rounded-2xl p-3 shadow-card slide-up">' +
-        '<div class="flex items-center justify-between mb-2">' +
-          '<div class="font-bold">' + (t[serviceKey] || serviceKey) + '</div>' +
-          '<button class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-vxline" data-action="go-dashboard">' + t.back + '</button>' +
-        '</div>' +
-        '<form id="serviceForm" data-service="' + serviceKey + '" class="space-y-2">' +
-          schema.map(renderField).join('') +
-          '<button type="submit" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">' + t.submit + '</button>' +
-        '</form>' +
-      '</div>';
+      return '<section class="mt-3 space-y-2 slide-up">' +
+        '<div class="glass rounded-2xl p-3 flex items-center justify-between">' +
+          '<div class="font-bold">' + t.operations + '</div>' +
+          '<button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">' + t.back + '</button>' +
+        '</div>' + rows +
+      '</section>';
     }
 
     function renderPayments() {
@@ -255,45 +269,30 @@
         ? ('1 USD = ' + ((m && m.rub_per_unit) || 30) + ' RUB')
         : ('1 RUB = ' + ((m && m.local_per_rub) || 0) + ' ' + ((m && m.local_currency) || ''));
 
-      return '<div class="space-y-2 slide-up">' +
-        '<div class="glass rounded-2xl p-3 shadow-card">' +
-          '<div class="flex items-center justify-between">' +
-            '<div class="font-bold">' + t.paymentCenter + '</div>' +
-            '<button class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-vxline" data-action="go-dashboard">' + t.back + '</button>' +
-          '</div>' +
-          '<div class="flex flex-wrap gap-2 mt-2">' + tabs + '</div>' +
-        '</div>' +
-
-        '<div class="glass rounded-2xl p-3 shadow-card">' +
+      return '<section class="mt-3 space-y-2 slide-up">' +
+        '<div class="glass rounded-2xl p-3 flex items-center justify-between"><div class="font-bold">' + t.paymentCenter + '</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">' + t.back + '</button></div>' +
+        '<div class="glass rounded-2xl p-3"><div class="flex flex-wrap gap-2">' + tabs + '</div></div>' +
+        '<div class="glass rounded-2xl p-3">' +
           '<div class="text-xs text-vxmuted">' + (isAr ? 'رقم الحساب' : 'Account ID') + '</div>' +
-          '<div class="flex items-center gap-2 mt-1">' +
-            '<div id="accId" class="font-bold text-sm flex-1 break-all">' + ((m && m.account_id) || '-') + '</div>' +
-            '<button data-action="copy-account" class="px-3 py-2 rounded-xl border border-vxline bg-white/5 text-xs">' + t.copy + '</button>' +
-          '</div>' +
-
+          '<div class="flex items-center gap-2 mt-1"><div id="accId" class="font-bold text-sm flex-1 break-all">' + ((m && m.account_id) || '-') + '</div><button data-action="copy-account" class="px-3 py-2 rounded-xl border border-vxline bg-white/5 text-xs">' + t.copy + '</button></div>' +
           '<div class="text-xs text-vxmuted mt-3">' + t.amount + ' (' + ((m && m.local_currency) || '') + ')</div>' +
           '<input id="payAmount" inputmode="decimal" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" placeholder="0.00" />' +
-
           '<div class="text-xs text-vxmuted mt-3">' + t.txid + '</div>' +
           '<input id="payTx" class="w-full mt-1 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm outline-none focus:shadow-glow" placeholder="TX123..." />' +
-
           '<div id="payConv" class="mt-3 rounded-xl border border-vxline bg-white/5 px-3 py-2 text-sm">' + t.converter + ': 0.00 RUB</div>' +
           '<div class="text-[11px] text-vxmuted mt-1">' + rateText + '</div>' +
-
-          '<button data-action="submit-payment" class="w-full mt-3 rounded-xl bg-gradient-to-r from-vxgold to-amber-300 text-black font-extrabold py-2.5 flex items-center justify-center gap-2">' +
-            '<span>' + t.payConfirm + '</span>' +
-          '</button>' +
+          '<button data-action="submit-payment" class="w-full mt-3 rounded-xl bg-gradient-to-r from-vxgold to-amber-300 text-black font-extrabold py-2.5 flex items-center justify-center gap-2"><span>' + t.payConfirm + '</span></button>' +
         '</div>' +
-      '</div>';
+      '</section>';
     }
 
     function render() {
-      const app = document.getElementById('app');
-      let body = state.view === 'dashboard' ? renderHeader() : '';
-      if (state.view === 'dashboard') body += renderDashboard();
-      else if (state.view === 'payments') body += renderPayments();
-      else body += renderServiceForm(state.view);
-      app.innerHTML = body;
+      const app = document.getElementById("app");
+      let html = renderTopBar();
+      if (state.view === "dashboard") html += renderDashboard();
+      else if (state.view === "payments") html += renderPayments();
+      else if (state.view === "operations") html += renderOperations();
+      app.innerHTML = html;
       bindEvents();
       refreshPaymentPreview();
     }
@@ -311,45 +310,46 @@
       amountInput.oninput = repaint;
     }
 
-    function showToast(text, ok) {
-      const toast = document.createElement('div');
-      toast.className = 'fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm pulse-ok ' + (ok ? 'bg-emerald-500/20 border-emerald-400/40' : 'bg-rose-500/20 border-rose-400/40');
-      toast.textContent = text;
-      document.body.appendChild(toast);
-      setTimeout(function(){ toast.remove(); }, 1600);
+    function openServiceFromCard(key) {
+      if (key === "payments") {
+        state.view = "payments";
+        render();
+        return;
+      }
+      if (key === "operations") {
+        state.view = "operations";
+        render();
+        return;
+      }
+      const ok = sendAction("open_service:" + key, { source: "vaultx_super_app" });
+      if (ok) {
+        showToast(t.loading, true);
+        setTimeout(function(){ if (tg) tg.close(); }, 250);
+      } else {
+        showToast(t.openInTelegram, false);
+      }
     }
 
     function bindEvents() {
       document.querySelectorAll('[data-service]').forEach(function(btn){
+        btn.onclick = function(){ openServiceFromCard(btn.dataset.service); };
+      });
+
+      document.querySelectorAll('[data-top]').forEach(function(btn){
         btn.onclick = function(){
-          const key = btn.dataset.service;
-          if (key === 'payments') {
-            state.view = 'payments';
+          const key = btn.dataset.top;
+          if (key === "operations") {
+            state.view = "operations";
             render();
             return;
           }
-          sendAction('open_service:' + key, { source: 'vaultx_webapp_card' });
-          showToast(t.success, true);
-          if (tg) setTimeout(function(){ tg.close(); }, 320);
+          openServiceFromCard(key);
         };
       });
+
       document.querySelectorAll('[data-action="go-dashboard"]').forEach(function(btn){
         btn.onclick = function(){ state.view = 'dashboard'; render(); };
       });
-      document.querySelectorAll('[data-action="open-settings"]').forEach(function(btn){
-        btn.onclick = function(){ showToast(isAr ? 'الإعدادات قريباً' : 'Settings soon', true); };
-      });
-
-      const form = document.getElementById('serviceForm');
-      if (form) {
-        form.onsubmit = function(e){
-          e.preventDefault();
-          const data = Object.fromEntries(new FormData(form).entries());
-          sendAction('service_request:' + form.dataset.service, data);
-          showToast(t.success, true);
-          if (tg) setTimeout(function(){ tg.close(); }, 550);
-        };
-      }
 
       document.querySelectorAll('[data-method]').forEach(function(btn){
         btn.onclick = function(){ state.selectedMethod = btn.dataset.method; state.view = 'payments'; render(); };
@@ -378,16 +378,32 @@
             return;
           }
           submitPay.innerHTML = '<div class="loader"></div><span>' + t.processing + '</span>';
-          sendGateway(state.selectedMethod, n, txid);
-          setTimeout(function(){
-            showToast(t.success, true);
-            if (tg) tg.close();
-          }, 420);
+          const ok = sendGateway(state.selectedMethod, n, txid);
+          if (!ok) {
+            showToast(t.openInTelegram, false);
+            submitPay.innerHTML = '<span>' + t.payConfirm + '</span>';
+            return;
+          }
+          setTimeout(async function(){
+            await refreshProfile();
+            showToast(isAr ? 'تم إرسال بيانات الدفع بنجاح' : 'Payment data submitted', true);
+            submitPay.innerHTML = '<span>' + t.payConfirm + '</span>';
+          }, 600);
         };
       }
     }
 
-    render();
+    async function boot() {
+      await refreshProfile();
+      await loadOperations();
+      render();
+    }
+
+    document.addEventListener('visibilitychange', function(){
+      if (document.visibilityState === 'visible') refreshProfile();
+    });
+
+    boot();
   </script>
 </body>
 </html>

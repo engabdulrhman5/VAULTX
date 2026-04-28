@@ -17,18 +17,51 @@ function getLevelFromTransactions(count) {
   return "Newbie";
 }
 
+function buildWebAppUserSnapshot(user) {
+  const normalized = user || {};
+  const txCount = Number(normalized.transactionsCount || 0);
+  return {
+    id: Number(normalized.userId || 0),
+    firstName: normalized.firstName || "User",
+    username: normalized.username || "",
+    balanceRub: Number(normalized.balance || 0),
+    level: getLevelFromTransactions(txCount),
+    xp: Math.min(100, txCount * 5),
+  };
+}
+
+function getWebAppProfile(appStore, userId) {
+  const user = appStore.findUserById(Number(userId));
+  if (!user) {
+    return buildWebAppUserSnapshot({
+      userId: Number(userId) || 0,
+      firstName: "Guest",
+      username: "",
+      balance: 0,
+      transactionsCount: 0,
+    });
+  }
+  return buildWebAppUserSnapshot(user);
+}
+
+function getWebAppTransactions(appStore, userId, limit = 10) {
+  const list = appStore.getRecentTransactionsForUser(Number(userId), Number(limit || 10));
+  return list.map((tx) => ({
+    id: String(tx.id || ""),
+    type: String(tx.type || tx.serviceKey || "transaction"),
+    serviceKey: String(tx.serviceKey || ""),
+    amount: Number(tx.amount || 0),
+    status: String(tx.status || "completed"),
+    createdAt: String(tx.createdAt || ""),
+  }));
+}
+
 function renderVaultXWebAppPage(req, res, appStore) {
   const lang = String(req?.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
   const initialScreen = String(req?.query?.screen || "dashboard").toLowerCase();
   const initialMethod = String(req?.query?.method || "").toLowerCase();
   const userId = Number(req?.query?.user_id || 0);
-  const user = appStore.findUserById(userId) || {
-    userId,
-    firstName: "Guest",
-    username: "",
-    balance: 0,
-    transactionsCount: 0,
-  };
+  const user = appStore.findUserById(userId) || null;
 
   const paymentMethods = ["binance", "jeeb", "vodafone"]
     .map((key) => {
@@ -48,14 +81,13 @@ function renderVaultXWebAppPage(req, res, appStore) {
     lang,
     initialScreen,
     initialMethod,
-    user: {
-      id: Number(user.userId || 0),
-      firstName: user.firstName || "User",
-      username: user.username || "",
-      balanceRub: Number(user.balance || 0),
-      level: getLevelFromTransactions(user.transactionsCount || 0),
-      xp: Math.min(100, Number(user.transactionsCount || 0) * 5),
-    },
+    user: buildWebAppUserSnapshot(user || {
+      userId,
+      firstName: "Guest",
+      username: "",
+      balance: 0,
+      transactionsCount: 0,
+    }),
     methods: paymentMethods,
   };
 
@@ -79,4 +111,6 @@ function renderVaultXWebAppPage(req, res, appStore) {
 
 module.exports = {
   renderVaultXWebAppPage,
+  getWebAppProfile,
+  getWebAppTransactions,
 };
