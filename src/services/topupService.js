@@ -1,4 +1,6 @@
 ﻿const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const axios = require("axios");
 const {
   ACTIVATIONS_CHANNEL_ID,
@@ -6,6 +8,7 @@ const {
   CRYPTOMUS_MERCHANT_ID,
   CRYPTOMUS_API_KEY,
   USD_TO_RUB_RATE,
+  PUBLIC_BASE_URL,
 } = require("../config");
 const {
   getTopupHomeKeyboard,
@@ -31,6 +34,35 @@ const CRYPTO_ASSET_PRECISION = {
 };
 
 const CRYPTOMUS_API_BASE = "https://api.cryptomus.com";
+const BOT_CONFIG_PATH = path.resolve(__dirname, "..", "..", "bot_config.json");
+
+function loadBotTopupConfig() {
+  try {
+    const raw = fs.readFileSync(BOT_CONFIG_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed?.topup || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function getGatewayMethodConfig(methodKey) {
+  const cfg = loadBotTopupConfig();
+  return cfg[String(methodKey || "").toLowerCase()] || null;
+}
+
+function buildPublicUrl(pathname, params = {}) {
+  const base = String(PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (!base) return "";
+  const query = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && String(v) !== "") {
+      query.set(k, String(v));
+    }
+  }
+  const qs = query.toString();
+  return `${base}${pathname}${qs ? `?${qs}` : ""}`;
+}
 
 function rubToUsd(amountRub) {
   return Number((Number(amountRub || 0) / Number(USD_TO_RUB_RATE || 30)).toFixed(2));
@@ -38,6 +70,22 @@ function rubToUsd(amountRub) {
 
 function usdToRub(amountUsd) {
   return Number((Number(amountUsd || 0) * Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+}
+
+function localToRub(methodKey, amountLocal) {
+  const amount = Number(amountLocal || 0);
+  const method = String(methodKey || "").toLowerCase();
+  const cfg = getGatewayMethodConfig(method);
+  if (!cfg || !Number.isFinite(amount) || amount <= 0) return 0;
+
+  if (method === "binance") {
+    const rubPerUsd = Number(cfg.rub_per_unit || USD_TO_RUB_RATE || 30);
+    return Number((amount * rubPerUsd).toFixed(2));
+  }
+
+  const localPerRub = Number(cfg.local_per_rub || 0);
+  if (!Number.isFinite(localPerRub) || localPerRub <= 0) return 0;
+  return Number((amount / localPerRub).toFixed(2));
 }
 
 function buildCryptoAssetKeyboard(lang = "ar") {
@@ -103,9 +151,7 @@ async function callCryptoPayApi(method, payload = {}) {
 
 function findDirectRate(rates, source, target) {
   const direct = rates.find((item) => item.source === source && item.target === target);
-  if (direct && Number(direct.rate) > 0) {
-    return Number(direct.rate);
-  }
+  if (direct && Number(direct.rate) > 0) return Number(direct.rate);
   return null;
 }
 
@@ -408,6 +454,53 @@ async function sendCryptomusInvoiceCard(bot, chatId, payload, options = {}) {
   );
 }
 
+async function sendGatewayWebAppLauncher(bot, chatId, methodKey, options = {}) {
+  const lang = options.lang || "ar";
+  const userId = Number(options.userId || 0);
+  const method = String(methodKey || "").toLowerCase();
+  const methodCfg = getGatewayMethodConfig(method);
+  if (!methodCfg) {
+    return sendPlaceholderTopupMethod(bot, chatId, method, options);
+  }
+
+  const webAppUrl = buildPublicUrl("/webapp/recharge", { method, lang, user_id: userId });
+  if (!webAppUrl) {
+    throw new Error("PUBLIC_BASE_URL is missing for WebApp launch");
+  }
+
+  const methodLabel = lang === "ar"
+    ? (methodCfg.title_ar || methodCfg.title_en || method)
+    : (methodCfg.title_en || methodCfg.title_ar || method);
+
+  const text = lang === "ar"
+    ? [
+      `💳 ${methodLabel}`,
+      "",
+      "✨ تم تفعيل الدفع الذكي عبر واجهة تفاعلية.",
+      "اضغط الزر أدناه لفتح نافذة الدفع وإرسال بيانات العملية.",
+    ].join("\n")
+    : [
+      `💳 ${methodLabel}`,
+      "",
+      "✨ Smart payment flow is enabled for this gateway.",
+      "Tap the button below to open the payment web app.",
+    ].join("\n");
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        {
+          text: lang === "ar" ? "🚀 فتح واجهة الدفع" : "🚀 Open Payment Web App",
+          web_app: { url: webAppUrl },
+        },
+      ],
+      [{ text: t(lang, "common_back"), callback_data: "service:balance_topup" }],
+    ],
+  };
+
+  return sendOrEditMessage(bot, chatId, text, keyboard, options.messageId, `sendGatewayWebAppLauncher.${method}`);
+}
+
 async function createCryptoInvoiceForRub(userId, amountRub, asset) {
   const normalizedAsset = String(asset || "").toUpperCase();
   if (!CRYPTO_SUPPORTED_ASSETS.includes(normalizedAsset)) {
@@ -528,6 +621,7 @@ module.exports = {
   sendCryptoAmountPrompt,
   sendCryptomusUsdPrompt,
   sendCryptomusInvoiceCard,
+  sendGatewayWebAppLauncher,
   sendCryptoInvoiceCheckout,
   sendStarsCheckout,
   sendPlaceholderTopupMethod,
@@ -535,6 +629,8 @@ module.exports = {
   createCryptoInvoiceForRub,
   createCryptomusPayment,
   verifyCryptomusWebhookSignature,
+  getGatewayMethodConfig,
+  localToRub,
   convertAssetAmountToRub,
   rubToUsd,
   usdToRub,

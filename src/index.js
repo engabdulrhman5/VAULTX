@@ -39,6 +39,13 @@ const {
   handleSupportCommand,
   handleSettingsCommand,
 } = require("./services/commandService");
+const {
+  handleGatewayWebAppData,
+  processSmsWebhook,
+  isSmsWebhookAuthorized,
+  renderGatewayWebAppPage,
+  startBinanceEmailWatcher,
+} = require("./services/topupVerificationService");
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is missing. Add it to your environment before starting the bot.");
@@ -292,13 +299,21 @@ const renderPort = Number(process.env.PORT || 0);
 if (Number.isFinite(renderPort) && renderPort > 0) {
   http.createServer(async (req, res) => {
     try {
-      if (req.method === "GET" && req.url === "/") {
+      const requestUrl = new URL(req.url || "/", "http://localhost");
+      req.query = Object.fromEntries(requestUrl.searchParams.entries());
+
+      if (req.method === "GET" && requestUrl.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
         res.end("I am alive");
         return;
       }
 
-      if (req.method === "POST" && req.url === "/crypto-webhook") {
+      if (req.method === "GET" && requestUrl.pathname === "/webapp/recharge") {
+        renderGatewayWebAppPage(req, res);
+        return;
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/crypto-webhook") {
         let body = "";
         req.on("data", (chunk) => {
           body += chunk;
@@ -323,7 +338,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
         return;
       }
 
-      if (req.method === "POST" && req.url === "/cryptomus-webhook") {
+      if (req.method === "POST" && requestUrl.pathname === "/cryptomus-webhook") {
         let body = "";
         req.on("data", (chunk) => {
           body += chunk;
@@ -344,6 +359,36 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             logBotError("http.cryptomus_webhook", error, { body });
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: "invalid cryptomus webhook payload" }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/webhook/sms") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > 2 * 1024 * 1024) {
+            req.destroy();
+          }
+        });
+
+        req.on("end", async () => {
+          try {
+            const parsed = body ? JSON.parse(body) : {};
+            if (!isSmsWebhookAuthorized(req, parsed)) {
+              res.writeHead(401, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+              return;
+            }
+
+            const result = await processSmsWebhook(bot, appStore, parsed);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          } catch (error) {
+            logBotError("http.sms_webhook", error, { body });
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "invalid sms payload" }));
           }
         });
         return;
@@ -845,6 +890,13 @@ bot.on("message", async (msg) => {
       return;
     }
 
+    if (msg.web_app_data?.data) {
+      const webAppHandled = await handleGatewayWebAppData(bot, msg, appStore);
+      if (webAppHandled) {
+        return;
+      }
+    }
+
     if (!msg.text) {
       return;
     }
@@ -902,6 +954,7 @@ async function bootstrap() {
     const botInfo = await bot.getMe();
     appContext.botUsername = botInfo.username;
     await setupBotCommands(bot);
+    startBinanceEmailWatcher(bot, appStore);
     console.log(`Telegram bot is running as @${botInfo.username}`);
     if (telegramProxyUrl) {
       console.log("[telegram] proxy is enabled");

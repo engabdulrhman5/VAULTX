@@ -12,6 +12,11 @@ const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_TOKEN || process.env.CRYPTO_BOT_
 const CRYPTOMUS_MERCHANT_ID = process.env.CRYPTOMUS_MERCHANT_ID || "";
 const CRYPTOMUS_API_KEY = process.env.CRYPTOMUS_API_KEY || "";
 const USD_TO_RUB_RATE = Number(process.env.USD_TO_RUB_RATE || 30);
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "").trim();
+const SMS_WEBHOOK_TOKEN = String(process.env.SMS_WEBHOOK_TOKEN || "").trim();
+const GMAIL_IMAP_USER = String(process.env.GMAIL_IMAP_USER || "").trim();
+const GMAIL_IMAP_APP_PASSWORD = String(process.env.GMAIL_IMAP_APP_PASSWORD || "").trim();
+const BINANCE_EMAIL_FROM = String(process.env.BINANCE_EMAIL_FROM || "do-not-reply@directmail.binance.com").trim().toLowerCase();
 const LOG_CHANNEL_ID = Number(process.env.LOG_CHANNEL_ID || -1003822505585);
 const ACTIVATIONS_CHANNEL_ID = Number(process.env.ACTIVATIONS_CHANNEL_ID || -1003311851705);
 const PRO_ACCOUNTS_CHANNEL_ID = Number(process.env.PRO_ACCOUNTS_CHANNEL_ID || -1003869626536);
@@ -25,6 +30,11 @@ module.exports = {
   CRYPTOMUS_MERCHANT_ID,
   CRYPTOMUS_API_KEY,
   USD_TO_RUB_RATE,
+  PUBLIC_BASE_URL,
+  SMS_WEBHOOK_TOKEN,
+  GMAIL_IMAP_USER,
+  GMAIL_IMAP_APP_PASSWORD,
+  BINANCE_EMAIL_FROM,
   LOG_CHANNEL_ID,
   ACTIVATIONS_CHANNEL_ID,
   PRO_ACCOUNTS_CHANNEL_ID,

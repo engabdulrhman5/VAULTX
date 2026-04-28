@@ -17,6 +17,7 @@
   "dependencies": {
     "axios": "^1.14.0",
     "dotenv": "^16.6.1",
+    "imapflow": "^1.0.185",
     "node-telegram-bot-api": "^0.66.0"
   }
 }
