@@ -110,6 +110,12 @@ function resolveVaultXWebAppUrl() {
   return `${base.replace(/\/+$/, "")}/webapp/app?lang=ar&v=${encodeURIComponent(version)}`;
 }
 
+function isLikelyMojibake(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  return /[ØÙÚÛÜÝÞß]|ط|ظ|ðŸ|�/.test(text);
+}
+
 async function handleCryptoWebhookEvent(event) {
   const invoiceId = Number(event?.invoice_id);
   const status = String(event?.status || "").toLowerCase();
@@ -550,11 +556,15 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
               const sellPrice = Math.ceil(parseFloat(supplierPrice) * 25 * 1.2);
               const countryMeta = getGrizzlyCountryMeta(countryId);
               const providerCountryName = String((countriesMap || {})[String(countryId)] || "").trim();
-              const countryName = providerCountryName || countryMeta?.name_en || countryMeta?.name_ar || `Country ${countryId}`;
+              const safeProviderCountryName = isLikelyMojibake(providerCountryName) ? "" : providerCountryName;
+              const safeMetaEn = isLikelyMojibake(countryMeta?.name_en) ? "" : String(countryMeta?.name_en || "").trim();
+              const safeMetaAr = isLikelyMojibake(countryMeta?.name_ar) ? "" : String(countryMeta?.name_ar || "").trim();
+              const countryName = safeProviderCountryName || safeMetaEn || safeMetaAr || `Country ${countryId}`;
               const previous = map.get(String(countryId)) || {
                 id: String(countryId),
                 name: countryName,
-                name_ar: countryMeta?.name_ar || countryName,
+                name_en: safeMetaEn || countryName,
+                name_ar: safeMetaAr || countryName,
                 flag: countryMeta?.flag || "🌍",
                 options: [],
                 availableCount: 0,

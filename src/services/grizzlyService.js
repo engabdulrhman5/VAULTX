@@ -155,11 +155,41 @@ async function requestProviderWithFailover(providerKey, params, mode = "json") {
 function parseCountriesPayload(payload) {
   if (!payload || typeof payload !== "object") return {};
   const out = {};
+
+  const consumeEntry = (idLike, item) => {
+    const rawId = item?.id ?? item?.country_id ?? item?.countryId ?? item?.value ?? idLike;
+    const id = String(rawId ?? "").trim();
+    if (!id) return;
+    const label = String(
+      item?.name_en
+      || item?.name
+      || item?.country
+      || item?.title
+      || item?.text
+      || ""
+    ).trim();
+    if (label) out[id] = label;
+  };
+
+  const maybeArray = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload.countries)
+      ? payload.countries
+      : (Array.isArray(payload.data) ? payload.data : null));
+
+  if (maybeArray) {
+    maybeArray.forEach((item, idx) => {
+      if (item && typeof item === "object") consumeEntry(idx, item);
+    });
+    return out;
+  }
+
   Object.entries(payload).forEach(([id, item]) => {
     if (item && typeof item === "object") {
-      const label = String(item.name_en || item.name || item.country || item.title || "").trim();
-      if (label) out[String(id)] = label;
-    } else if (typeof item === "string") {
+      consumeEntry(id, item);
+      return;
+    }
+    if (typeof item === "string") {
       const label = item.trim();
       if (label) out[String(id)] = label;
     }

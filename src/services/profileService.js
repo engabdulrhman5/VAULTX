@@ -52,9 +52,10 @@ async function sendOrEditMessage(bot, chatId, text, replyMarkup, messageId, scop
 
 function buildMainMenuText(user) {
   const lang = getUserLang(user);
+  const header = lang === "ar" ? "القائمة الرئيسية" : "Main Menu";
 
   return [
-    `<b>${t(lang, "mainMenu_header")}</b>`,
+    `<b>${header}</b>`,
     "",
     `👤 ${escapeHtml(getDisplayName(user))}`,
     `🆔 <code>${user.userId}</code>`,

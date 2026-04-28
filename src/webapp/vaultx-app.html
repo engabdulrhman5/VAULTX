@@ -33,7 +33,16 @@
       level: isAr ? "المستوى" : "Level", operations: isAr ? "عمليّاتي" : "My Operations",
       account: isAr ? "حسابي" : "My Account", referral: isAr ? "الإحالة" : "Referral", settings: isAr ? "الإعدادات" : "Settings",
       transfer: isAr ? "تحويل رصيد" : "Transfer Balance", convert: isAr ? "تحويل العملات" : "Currency Convert",
-      digital_numbers: isAr ? "الأرقام الوهمية" : "Virtual Numbers", payments: isAr ? "شحن الحساب" : "Top Up",
+      digital_numbers: isAr ? "الأرقام الوهمية" : "Virtual Numbers",
+      social_boost: isAr ? "رشق الحسابات" : "Social Boost",
+      game_topup: isAr ? "شحن الألعاب" : "Game Top-up",
+      pro_accounts: isAr ? "حسابات Pro" : "Pro Accounts",
+      social_accounts: isAr ? "حسابات سوشيال" : "Social Accounts",
+      cloud_services: isAr ? "خدمات سحابية" : "Cloud Services",
+      temporary_emails: isAr ? "إيميلات مؤقتة" : "Temporary Emails",
+      virtual_visa: isAr ? "فيزا افتراضية" : "Virtual Visa",
+      other_services: isAr ? "خدمات أخرى" : "Other Services",
+      payments: isAr ? "شحن الحساب" : "Top Up",
       chooseApp: isAr ? "اختر التطبيق" : "Choose app", chooseCountry: isAr ? "اختر الدولة" : "Choose country",
       choosePrice: isAr ? "اختر السعر والسيرفر" : "Choose price and server", buyOk: isAr ? "تم شراء الرقم" : "Number purchased",
       reqCode: isAr ? "طلب الكود" : "Request Code", noOps: isAr ? "لا توجد عمليات" : "No operations",
@@ -131,7 +140,7 @@
 
     function virtualNumbers(){
       const appBtns=(state.vn.apps||[]).map(n=>`<button data-vn-app="${n}" class="px-3 py-2 rounded-xl border text-xs ${state.vn.app===n?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${n}</button>`).join('');
-      const countryBtns=(state.vn.countries||[]).slice(0,80).map(c=>`<button data-vn-country="${c.id}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(c.flag||'🌍')} ${esc(c.name_ar||c.name||('Country '+c.id))}</div><div class="text-[11px] text-vxmuted">₽ ${rub(c.minSellPrice||0)} • ${c.availableCount||0}</div></button>`).join('');
+      const countryBtns=(state.vn.countries||[]).slice(0,80).map(c=>`<button data-vn-country="${c.id}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(c.flag||'🌍')} ${esc(c.name||c.name_en||c.name_ar||('Country '+c.id))}</div><div class="text-[11px] text-vxmuted">₽ ${rub(c.minSellPrice||0)} • ${c.availableCount||0}</div></button>`).join('');
       const selected=state.vn.selectedCountry;
       const options=selected ? (selected.options||[]).map(op=>`<button data-vn-buy="${selected.id}" data-vn-provider="${op.providerKey}" data-vn-price="${op.sellPrice}" class="glass rounded-xl p-2 border border-vxline text-start"><div class="text-sm font-bold">${op.providerKey==='server1'?'Server 1':'Server 2'}</div><div class="text-[11px] text-vxmuted">₽ ${rub(op.sellPrice)} • ${op.availableCount||0}</div></button>`).join('') : '';
       const order=state.vn.order?`<div class="glass rounded-xl p-3 border border-vxline"><div class="font-bold mb-1">📦 ${esc(state.vn.order.app)}</div><div class="text-sm">${esc(state.vn.order.flag)} ${esc(state.vn.order.country_name)}</div><div class="text-sm mt-1">☎️ <code>${esc(state.vn.order.number)}</code></div><div class="text-sm mt-1">🛎 <code>${esc(state.vn.order.activation_id)}</code></div><div class="text-sm mt-1">💰 ₽ ${rub(state.vn.order.price_rub)}</div><button data-action="vn-check-code" class="w-full mt-3 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.reqCode}</button><div id="vnCode" class="text-sm mt-2 text-vxmuted"></div></div>`:'';
