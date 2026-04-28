@@ -1,7 +1,12 @@
 ﻿require("dotenv").config();
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
-const { BOT_TOKEN, ADMIN_CHANNEL_ID, PUBLIC_BASE_URL } = require("./config");
+const {
+  BOT_TOKEN,
+  ADMIN_CHANNEL_ID,
+  PUBLIC_BASE_URL,
+  TELEGRAM_WEBAPP_URL,
+} = require("./config");
 const { AppStore } = require("./services/appStore");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
@@ -79,6 +84,14 @@ const appContext = {
 };
 let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
+
+function resolveVaultXWebAppUrl() {
+  const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
+  if (explicit) return explicit;
+  const base = String(PUBLIC_BASE_URL || "").trim();
+  if (!base) return "";
+  return `${base.replace(/\/+$/, "")}/webapp/app?lang=ar`;
+}
 
 async function handleCryptoWebhookEvent(event) {
   const invoiceId = Number(event?.invoice_id);
@@ -965,8 +978,8 @@ async function bootstrap() {
     appContext.botUsername = botInfo.username;
     await setupBotCommands(bot);
     startBinanceEmailWatcher(bot, appStore);
-    if (PUBLIC_BASE_URL) {
-      const webAppUrl = `${String(PUBLIC_BASE_URL).replace(/\/+$/, "")}/webapp/app?lang=ar`;
+    const webAppUrl = resolveVaultXWebAppUrl();
+    if (webAppUrl) {
       await safeTelegramCall("bootstrap.setChatMenuButton", () =>
         bot.setChatMenuButton({
           menu_button: {
@@ -976,6 +989,20 @@ async function bootstrap() {
           },
         })
       );
+      await safeTelegramCall("bootstrap.sendProAppLaunch", () =>
+        bot.sendMessage(
+          ADMIN_CHANNEL_ID,
+          "VaultX Pro menu button configured.",
+          {
+            disable_web_page_preview: true,
+            reply_markup: {
+              inline_keyboard: [[{ text: "Open VaultX Pro", web_app: { url: webAppUrl } }]],
+            },
+          }
+        )
+      );
+    } else {
+      console.log("[webapp] PUBLIC_BASE_URL/TELEGRAM_WEBAPP_URL is missing, menu button was not configured.");
     }
     console.log(`Telegram bot is running as @${botInfo.username}`);
     if (telegramProxyUrl) {

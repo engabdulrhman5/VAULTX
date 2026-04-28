@@ -13,6 +13,7 @@ const CRYPTOMUS_MERCHANT_ID = process.env.CRYPTOMUS_MERCHANT_ID || "";
 const CRYPTOMUS_API_KEY = process.env.CRYPTOMUS_API_KEY || "";
 const USD_TO_RUB_RATE = Number(process.env.USD_TO_RUB_RATE || 30);
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "").trim();
+const TELEGRAM_WEBAPP_URL = String(process.env.TELEGRAM_WEBAPP_URL || "").trim();
 const SMS_WEBHOOK_TOKEN = String(process.env.SMS_WEBHOOK_TOKEN || "").trim();
 const GMAIL_IMAP_USER = String(process.env.GMAIL_IMAP_USER || "").trim();
 const GMAIL_IMAP_APP_PASSWORD = String(process.env.GMAIL_IMAP_APP_PASSWORD || "").trim();
@@ -31,6 +32,7 @@ module.exports = {
   CRYPTOMUS_API_KEY,
   USD_TO_RUB_RATE,
   PUBLIC_BASE_URL,
+  TELEGRAM_WEBAPP_URL,
   SMS_WEBHOOK_TOKEN,
   GMAIL_IMAP_USER,
   GMAIL_IMAP_APP_PASSWORD,
