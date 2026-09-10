@@ -410,6 +410,10 @@ async function handleAdminCallbacks(bot, query, appStore) {
 
 async function handleCallbackQuery(bot, query, appStore, appContext) {
   try {
+    if (!query || !query.data || typeof query.data !== "string") {
+      return true;
+    }
+
     if (query.data.startsWith("admin:") || query.data.startsWith("adte:")) {
       return await handleAdminCallbacks(bot, query, appStore);
     }
@@ -1225,7 +1229,12 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
           const services = appStore.getServices();
 
           if (!SERVICE_KEYS.includes(serviceKey) || !services[serviceKey]) {
-            await sendPlaceholderReply(bot, chatId, getUserLang(user) === "ar" ? "قسم غير معروف" : "Unknown section", messageId);
+            await safeTelegramCall("handleCallbackQuery.unknownService", () =>
+              bot.answerCallbackQuery(query.id, {
+                text: getUserLang(user) === "ar" ? "القسم غير متاح حاليًا." : "This section is unavailable right now.",
+                show_alert: true,
+              })
+            );
             return true;
           }
 
@@ -1245,11 +1254,23 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
             return true;
           }
 
+          await safeTelegramCall("handleCallbackQuery.servicePlaceholder", () =>
+            bot.answerCallbackQuery(query.id, {
+              text: services[serviceKey].name || (getUserLang(user) === "ar" ? "فتح القسم..." : "Opening section..."),
+              show_alert: false,
+            })
+          );
           await sendPlaceholderReply(bot, chatId, services[serviceKey].name, messageId);
           return true;
         }
 
-        return false;
+        await safeTelegramCall("handleCallbackQuery.unhandledFallback", () =>
+          bot.answerCallbackQuery(query.id, {
+            text: getUserLang(user) === "ar" ? "الأمر غير متاح الآن." : "This action is not available right now.",
+            show_alert: true,
+          })
+        );
+        return true;
     }
   } catch (error) {
     logBotError("handleCallbackQuery", error, { userId: query.from?.id, data: query.data });

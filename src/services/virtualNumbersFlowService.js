@@ -1714,7 +1714,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
     return true;
   } catch (error) {
     logBotError("handleVirtualNumbersCallback", error, { data: query.data, userId: query.from?.id });
-    return true;
+    return false;
   }
 }
 
