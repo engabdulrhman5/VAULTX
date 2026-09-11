@@ -4,12 +4,11 @@
   "description": "Modular Telegram bot foundation built with node-telegram-bot-api",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "start": "node -r ./src/services/vaultxRuntime.js src/index.js",
+    "dev": "node --watch -r ./src/services/vaultxRuntime.js src/index.js"
   },
   "keywords": [
     "telegram",
-    "bot",
     "nodejs"
   ],
   "author": "",
