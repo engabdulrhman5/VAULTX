@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: true
     buildCommand: npm ci
-    startCommand: node src/index.js
+    startCommand: node -r ./src/services/vaultxRuntime.js src/index.js
     healthCheckPath: /
     envVars:
       - key: NODE_VERSION
