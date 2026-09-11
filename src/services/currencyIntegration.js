@@ -98,6 +98,7 @@ function install() {
 
   const originalNormalizeUser = AppStore.prototype.normalizeUser;
   AppStore.prototype.normalizeUser = function patchedNormalizeUser(user) {
+    global.__VAULTX_APP_STORE = this;
     const normalized = originalNormalizeUser.call(this, user);
     normalized.currency = normalizeCurrency(user?.currency || normalized.currency);
     return normalized;
@@ -111,7 +112,7 @@ function install() {
   const originalEditMessageText = TelegramBot.prototype.editMessageText;
   TelegramBot.prototype.editMessageText = function patchedEditMessageText(text, options, callback) {
     const chatId = options?.chat_id;
-    return originalEditMessageText.call(this, convertUserFacingRub(text, getCurrencyForChat(chatId)), options, callback);
+    return originalEditMessageText.call(this, chatId === undefined ? text : convertUserFacingRub(text, getCurrencyForChat(chatId)), options, callback);
   };
 
   const originalOn = TelegramBot.prototype.on;
