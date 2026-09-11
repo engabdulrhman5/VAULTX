@@ -180,6 +180,32 @@ function patchTelegramOutput() {
     TelegramBot.prototype.sendMessage = patched;
   }
 
+  const originalSendPhoto = TelegramBot.prototype.sendPhoto;
+  if (typeof originalSendPhoto === 'function' && !originalSendPhoto.__vaultxCurrencyPatched) {
+    const patched = function patchedSendPhoto(chatId, photo, options, fileOptions, callback) {
+      const currency = getCurrencyForChat(chatId);
+      const nextOptions = options && typeof options === 'object' ? { ...options } : options;
+      if (typeof nextOptions?.caption === 'string') nextOptions.caption = replaceMoney(nextOptions.caption, currency);
+      if (nextOptions?.reply_markup) nextOptions.reply_markup = transformMarkup(nextOptions.reply_markup, currency);
+      return originalSendPhoto.call(this, chatId, photo, nextOptions, fileOptions, callback);
+    };
+    patched.__vaultxCurrencyPatched = true;
+    TelegramBot.prototype.sendPhoto = patched;
+  }
+
+  const originalSendDocument = TelegramBot.prototype.sendDocument;
+  if (typeof originalSendDocument === 'function' && !originalSendDocument.__vaultxCurrencyPatched) {
+    const patched = function patchedSendDocument(chatId, document, options, fileOptions, callback) {
+      const currency = getCurrencyForChat(chatId);
+      const nextOptions = options && typeof options === 'object' ? { ...options } : options;
+      if (typeof nextOptions?.caption === 'string') nextOptions.caption = replaceMoney(nextOptions.caption, currency);
+      if (nextOptions?.reply_markup) nextOptions.reply_markup = transformMarkup(nextOptions.reply_markup, currency);
+      return originalSendDocument.call(this, chatId, document, nextOptions, fileOptions, callback);
+    };
+    patched.__vaultxCurrencyPatched = true;
+    TelegramBot.prototype.sendDocument = patched;
+  }
+
   const originalEditMessageText = TelegramBot.prototype.editMessageText;
   if (!originalEditMessageText.__vaultxCurrencyPatched) {
     const patched = function patchedEditMessageText(text, options, callback) {
