@@ -7,15 +7,13 @@ const { getSmsProvider } = require("../constants/smsProviders");
 const { getAxiosNetworkOptions } = require("../utils/network");
 
 const CACHE_FILE_PATH = path.resolve(__dirname, "../pricesCache.json");
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const USD_TO_RUB = 30;
 
 function readCacheFile() {
   try {
-    if (!fs.existsSync(CACHE_FILE_PATH)) {
-      return {};
-    }
-
-    const raw = fs.readFileSync(CACHE_FILE_PATH, "utf8");
-    return JSON.parse(raw || "{}") || {};
+    if (!fs.existsSync(CACHE_FILE_PATH)) return {};
+    return JSON.parse(fs.readFileSync(CACHE_FILE_PATH, "utf8") || "{}") || {};
   } catch (error) {
     logBotError("grizzlyCache.readCacheFile", error);
     return {};
@@ -33,12 +31,9 @@ function writeCacheFile(data) {
 async function fetchAndCachePrices() {
   try {
     const provider = getSmsProvider("server2");
-    const apiKey = provider.apiKey;
-    if (!apiKey || !provider.baseUrl) {
-      throw new Error("Missing GRIZZLY_API_KEY");
-    }
+    if (!provider.apiKey || !provider.baseUrl) throw new Error("Missing GRIZZLY_API_KEY");
 
-    const url = `${provider.baseUrl}?api_key=${encodeURIComponent(apiKey)}&action=getPrices`;
+    const url = `${provider.baseUrl}?api_key=${encodeURIComponent(provider.apiKey)}&action=getPrices`;
     const response = await axios.get(url, {
       timeout: 20000,
       headers: { Accept: "application/json,text/plain;q=0.9,*/*;q=0.8" },
@@ -46,35 +41,25 @@ async function fetchAndCachePrices() {
     });
     const raw = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
     const payload = JSON.parse(String(raw || "{}"));
-    const result = {};
-
-    const serviceCode = "wa";
-    result[serviceCode] = [];
+    const result = { wa: [], fetchedAt: Date.now(), ttlMs: CACHE_TTL_MS, sourceCurrency: "USD", usdToRub: USD_TO_RUB };
 
     Object.entries(payload || {}).forEach(([countryId, countryInfo]) => {
       const count = Number(countryInfo?.count ?? countryInfo?.qty ?? countryInfo?.stock ?? 0);
-      const originalPriceUsd = Number(countryInfo?.cost ?? countryInfo?.price ?? 0);
-
-      if (!count || count <= 0 || !Number.isFinite(originalPriceUsd) || originalPriceUsd <= 0) {
-        return;
-      }
-
-      if (!grizzlyCountries[countryId]) {
-        return;
-      }
-
-      const finalPriceRub = Math.ceil(parseFloat(originalPriceUsd) * 25 * 1.20);
+      const priceUsd = Number(countryInfo?.cost ?? countryInfo?.price ?? 0);
       const meta = grizzlyCountries[countryId];
+      if (!count || count <= 0 || !Number.isFinite(priceUsd) || priceUsd <= 0 || !meta) return;
 
-      result[serviceCode].push({
+      result.wa.push({
         countryId: String(countryId),
-        priceRub: finalPriceRub,
+        priceUsd: Number(priceUsd.toFixed(6)),
+        priceRub: Number((priceUsd * USD_TO_RUB).toFixed(2)),
         name_ar: meta.name_ar,
         flag: meta.flag,
+        count: Math.floor(count),
       });
     });
 
-    result[serviceCode].sort((a, b) => a.priceRub - b.priceRub);
+    result.wa.sort((a, b) => a.priceRub - b.priceRub);
     writeCacheFile(result);
     return result;
   } catch (error) {
@@ -85,6 +70,8 @@ async function fetchAndCachePrices() {
 
 function getCachedCountries(serviceCode = "wa") {
   const cache = readCacheFile();
+  const fetchedAt = Number(cache.fetchedAt || 0);
+  if (fetchedAt && Date.now() - fetchedAt > CACHE_TTL_MS) return [];
   return Array.isArray(cache[serviceCode]) ? cache[serviceCode] : [];
 }
 
