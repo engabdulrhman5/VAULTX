@@ -13,22 +13,10 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const USD_TO_RUB = 30;
 
 function readCacheFile() {
-  try {
-    if (!fs.existsSync(CACHE_FILE_PATH)) return {};
-    return JSON.parse(fs.readFileSync(CACHE_FILE_PATH, "utf8") || "{}") || {};
-  } catch (error) {
-    logBotError("grizzlyCache.readCacheFile", error);
-    return {};
-  }
+  try { if (!fs.existsSync(CACHE_FILE_PATH)) return {}; return JSON.parse(fs.readFileSync(CACHE_FILE_PATH, "utf8") || "{}") || {}; }
+  catch (error) { logBotError("grizzlyCache.readCacheFile", error); return {}; }
 }
-
-function writeCacheFile(data) {
-  try {
-    fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
-  } catch (error) {
-    logBotError("grizzlyCache.writeCacheFile", error);
-  }
-}
+function writeCacheFile(data) { try { fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2), "utf8"); } catch (error) { logBotError("grizzlyCache.writeCacheFile", error); } }
 
 async function fetchAndCachePrices() {
   try {
@@ -49,10 +37,7 @@ async function fetchAndCachePrices() {
     result.wa.sort((a, b) => a.priceRub - b.priceRub);
     writeCacheFile(result);
     return result;
-  } catch (error) {
-    logBotError("grizzlyCache.fetchAndCachePrices", error);
-    return readCacheFile();
-  }
+  } catch (error) { logBotError("grizzlyCache.fetchAndCachePrices", error); return readCacheFile(); }
 }
 
 function getCachedCountries(serviceCode = "wa") {
@@ -61,5 +46,8 @@ function getCachedCountries(serviceCode = "wa") {
   if (fetchedAt && Date.now() - fetchedAt > CACHE_TTL_MS) return [];
   return Array.isArray(cache[serviceCode]) ? cache[serviceCode] : [];
 }
+
+setTimeout(() => { fetchAndCachePrices(); }, 1000);
+setInterval(() => { fetchAndCachePrices(); }, CACHE_TTL_MS);
 
 module.exports = { grizzlyCountries, fetchAndCachePrices, getCachedCountries };
