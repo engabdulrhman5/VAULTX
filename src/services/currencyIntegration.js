@@ -18,6 +18,16 @@ mainKeyboard.getSettingsMenuKeyboard = function patchedSettingsKeyboard(lang = "
 const { sendMainMenu, sendSettingsMenu } = require("./profileService");
 const { safeTelegramCall } = require("./telegramSafe");
 let installed = false;
+const activeCurrencyByChat = new Map();
+
+function getCurrencyForChat(chatId) {
+  return normalizeCurrency(activeCurrencyByChat.get(String(chatId)) || "RUB");
+}
+
+function rememberChatCurrency(chatId, currency) {
+  if (chatId === undefined || chatId === null) return;
+  activeCurrencyByChat.set(String(chatId), normalizeCurrency(currency));
+}
 
 function getCurrencyPrompt(lang, current) {
   return lang === "ar"
@@ -26,19 +36,20 @@ function getCurrencyPrompt(lang, current) {
 }
 function getCaptchaCode() { return String(Math.floor(10000 + Math.random() * 90000)); }
 
-function convertUserFacingRub(text) {
-  const currency = normalizeCurrency(global.__VAULTX_ACTIVE_CURRENCY || "RUB");
-  if (currency === "RUB") return text;
+function convertUserFacingRub(text, currency = "RUB") {
+  const code = normalizeCurrency(currency);
+  if (code === "RUB") return text;
   return String(text || "")
-    .replace(/₽\s*([0-9]+(?:\.[0-9]+)?)/g, (_, value) => formatCurrency(Number(value), currency))
-    .replace(/([0-9]+(?:\.[0-9]+)?)\s*RUB\b/gi, (_, value) => formatCurrency(Number(value), currency))
-    .replace(/([0-9]+(?:\.[0-9]+)?)\s*روبل/g, (_, value) => formatCurrency(Number(value), currency))
-    .replace(/روبل/g, currency === "YER" ? "ريال يمني" : currency === "SAR" ? "ريال سعودي" : currency === "USD" ? "دولار" : "روبل")
-    .replace(/₽/g, currency === "USD" ? "$" : currency === "YER" ? "ر.ي" : currency === "SAR" ? "ر.س" : "₽");
+    .replace(/₽\s*([0-9]+(?:\.[0-9]+)?)/g, (_, value) => formatCurrency(Number(value), code))
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*RUB\b/gi, (_, value) => formatCurrency(Number(value), code))
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*روبل/g, (_, value) => formatCurrency(Number(value), code))
+    .replace(/روبل/g, code === "YER" ? "ريال يمني" : code === "SAR" ? "ريال سعودي" : code === "USD" ? "دولار" : "روبل")
+    .replace(/₽/g, code === "USD" ? "$" : code === "YER" ? "ر.ي" : code === "SAR" ? "ر.س" : "₽");
 }
 
 async function showCurrencySelection(bot, query, user, mode = "registration") {
   const lang = locales.getUserLang(user);
+  rememberChatCurrency(query.message?.chat?.id || query.from?.id, user.currency);
   if (mode === "registration") setUserState(user.userId, "AWAITING_CURRENCY", { language: lang });
   return safeTelegramCall("currency.showSelection", () => bot.editMessageText(getCurrencyPrompt(lang, user.currency), {
     chat_id: query.message?.chat?.id || query.from.id,
@@ -53,6 +64,7 @@ async function completeLanguageSelection(bot, query, appStore) {
   const user = appStore.getOrCreateUser(query.from);
   const updatedUser = appStore.updateUser(user.userId, { language: selectedLanguage });
   if (!updatedUser) return true;
+  rememberChatCurrency(query.message?.chat?.id || query.from?.id, updatedUser.currency);
   await safeTelegramCall("currency.language.answer", () => bot.answerCallbackQuery(query.id, { text: selectedLanguage === "ar" ? "تم حفظ اللغة، اختر العملة الآن" : "Language saved, choose your currency now" }));
   if (updatedUser.isVerified) {
     await sendMainMenu(bot, query.message.chat.id, updatedUser, { messageId: query.message.message_id });
@@ -68,6 +80,7 @@ async function completeCurrencySelection(bot, query, appStore, currency) {
   const updatedUser = appStore.updateUser(user.userId, { currency: selected });
   const state = getUserState(user.userId);
   const lang = locales.getUserLang(updatedUser || user);
+  rememberChatCurrency(query.message?.chat?.id || query.from?.id, selected);
   await safeTelegramCall("currency.set.answer", () => bot.answerCallbackQuery(query.id, { text: lang === "ar" ? `تم اختيار ${selected} ✅` : `${selected} selected ✅` }));
   if (state?.name === "AWAITING_CURRENCY" && !(updatedUser || user).isVerified) {
     const code = getCaptchaCode();
@@ -85,26 +98,20 @@ function install() {
 
   const originalNormalizeUser = AppStore.prototype.normalizeUser;
   AppStore.prototype.normalizeUser = function patchedNormalizeUser(user) {
-    global.__VAULTX_APP_STORE = this;
     const normalized = originalNormalizeUser.call(this, user);
     normalized.currency = normalizeCurrency(user?.currency || normalized.currency);
     return normalized;
   };
 
-  const originalGetUserLang = locales.getUserLang;
-  locales.getUserLang = function patchedGetUserLang(user) {
-    if (user?.currency) global.__VAULTX_ACTIVE_CURRENCY = normalizeCurrency(user.currency);
-    return originalGetUserLang(user);
-  };
-
   const originalSendMessage = TelegramBot.prototype.sendMessage;
   TelegramBot.prototype.sendMessage = function patchedSendMessage(chatId, text, options, callback) {
-    return originalSendMessage.call(this, chatId, convertUserFacingRub(text), options, callback);
+    return originalSendMessage.call(this, chatId, convertUserFacingRub(text, getCurrencyForChat(chatId)), options, callback);
   };
 
   const originalEditMessageText = TelegramBot.prototype.editMessageText;
   TelegramBot.prototype.editMessageText = function patchedEditMessageText(text, options, callback) {
-    return originalEditMessageText.call(this, convertUserFacingRub(text), options, callback);
+    const chatId = options?.chat_id;
+    return originalEditMessageText.call(this, convertUserFacingRub(text, getCurrencyForChat(chatId)), options, callback);
   };
 
   const originalOn = TelegramBot.prototype.on;
@@ -113,9 +120,14 @@ function install() {
       const wrapped = async function currencyAwareCallback(query) {
         const appStore = global.__VAULTX_APP_STORE;
         try {
+          if (query?.from?.id && appStore) {
+            const currentUser = appStore.findUserById(query.from.id);
+            if (currentUser) rememberChatCurrency(query.message?.chat?.id || query.from.id, currentUser.currency);
+          }
           if (query?.data?.startsWith("setlang_") && appStore) return completeLanguageSelection(this, query, appStore);
           if (query?.data === "menu:change_currency" && appStore) {
             const user = appStore.getOrCreateUser(query.from);
+            rememberChatCurrency(query.message?.chat?.id || query.from.id, user.currency);
             await safeTelegramCall("currency.menu.answer", () => this.answerCallbackQuery(query.id));
             return showCurrencySelection(this, query, user, "settings");
           }
@@ -128,6 +140,12 @@ function install() {
       return originalOn.call(this, event, wrapped);
     }
     return originalOn.call(this, event, handler);
+  };
+
+  const originalGetUserLang = locales.getUserLang;
+  locales.getUserLang = function patchedGetUserLang(user) {
+    if (user?.currency && user?.userId) rememberChatCurrency(user.userId, user.currency);
+    return originalGetUserLang(user);
   };
 }
 
