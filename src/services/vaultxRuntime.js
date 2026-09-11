@@ -46,6 +46,13 @@ function replaceMoney(text, targetCurrency) {
   let output = String(text ?? '');
   if (!output) return output;
   const target = normalizeCurrency(targetCurrency);
+
+  // Legacy game-topup strings used '$' to label RUB. Normalize only those
+  // explicit financial labels before processing genuine USD values.
+  output = output.replace(/(سعر\s*الوحدة|Unit\s*price)([^0-9$]*)([0-9]+(?:[.,][0-9]+)?)\s*\$/gi, '$1$2$3 RUB');
+  output = output.replace(/(السعر|Price)([^0-9$]*)([0-9]+(?:[.,][0-9]+)?)\s*\$/gi, '$1$2$3 RUB');
+  output = output.replace(/â‚½/g, 'RUB');
+
   const patterns = [
     { re: /₽\s*([0-9]+(?:[.,][0-9]+)?)/g, cur: 'RUB' },
     { re: /([0-9]+(?:[.,][0-9]+)?)\s*₽/g, cur: 'RUB' },
