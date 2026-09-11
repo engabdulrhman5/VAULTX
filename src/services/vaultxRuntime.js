@@ -100,6 +100,8 @@ function getCurrencyForChat(chatId) {
   return currencyFromUser(getUserForChat(chatId));
 }
 
+let cryptomusWebhookContext = null;
+
 function patchAppStore() {
   const originalNormalizeUser = AppStore.prototype.normalizeUser;
   if (!originalNormalizeUser.__vaultxCurrencyPatched) {
@@ -133,6 +135,35 @@ function patchAppStore() {
     };
     patched.__vaultxCurrencyPatched = true;
     AppStore.prototype.addTransaction = patched;
+  }
+
+  const originalAddBalance = AppStore.prototype.addBalance;
+  if (!originalAddBalance.__vaultxCryptomusGuardPatched) {
+    const guarded = function guardedAddBalance(userId, amount) {
+      const ctx = cryptomusWebhookContext;
+      if (ctx && Number(ctx.userId) === Number(userId)) {
+        const pending = this.transactions.find((tx) =>
+          tx.type === 'topup_cryptomus_pending' && String(tx.cryptomusOrderId || '') === String(ctx.orderId || '')
+        );
+        if (!pending) throw new Error('Cryptomus order is not pending or belongs to another user');
+        if (String(ctx.currency || '').toUpperCase() !== 'USD') throw new Error('Cryptomus invoice currency mismatch');
+        const paidUsd = Number(ctx.amount || 0);
+        const expectedUsd = Number(pending.amountUsd || 0);
+        if (!Number.isFinite(paidUsd) || paidUsd <= 0 || !Number.isFinite(expectedUsd) || expectedUsd <= 0) throw new Error('Invalid Cryptomus payment amount');
+        const status = String(ctx.status || '').toLowerCase();
+        if (status === 'paid' && Math.abs(paidUsd - expectedUsd) > 0.01) throw new Error('Cryptomus paid amount mismatch');
+        if (status === 'paid_over' && paidUsd + 0.01 < expectedUsd) throw new Error('Cryptomus paid_over amount mismatch');
+        const expectedRub = Number((paidUsd * Number(USD_TO_RUB_RATE || 30)).toFixed(2));
+        if (Math.abs(Number(amount) - expectedRub) > 0.02) throw new Error('Cryptomus RUB conversion mismatch');
+      }
+      try {
+        return originalAddBalance.call(this, userId, amount);
+      } finally {
+        if (ctx && Number(ctx.userId) === Number(userId)) cryptomusWebhookContext = null;
+      }
+    };
+    guarded.__vaultxCryptomusGuardPatched = true;
+    AppStore.prototype.addBalance = guarded;
   }
 }
 
@@ -227,7 +258,29 @@ function patchTopup() {
       const expectedBuffer = Buffer.from(expected.toLowerCase());
       const suppliedBuffer = Buffer.from(supplied.toLowerCase());
       if (expectedBuffer.length !== suppliedBuffer.length) return false;
-      return crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+      const verified = crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+      if (verified) {
+        try {
+          const verifiedPayload = JSON.parse(candidate || '{}');
+          let additional = {};
+          try { additional = typeof verifiedPayload.additional_data === 'string' ? JSON.parse(verifiedPayload.additional_data) : (verifiedPayload.additional_data || {}); } catch (_) { additional = {}; }
+          cryptomusWebhookContext = {
+            orderId: String(verifiedPayload.order_id || ''),
+            userId: Number(additional.user_id || 0),
+            amount: Number(verifiedPayload.payment_amount_usd || verifiedPayload.payment_amount || verifiedPayload.amount || 0),
+            currency: String(verifiedPayload.currency || ''),
+            status: String(verifiedPayload.status || '').toLowerCase(),
+          };
+          if (!cryptomusWebhookContext.userId) {
+            const store = global.__VAULTX_APP_STORE;
+            const pending = store?.transactions?.find((tx) => tx.type === 'topup_cryptomus_pending' && String(tx.cryptomusOrderId || '') === cryptomusWebhookContext.orderId);
+            cryptomusWebhookContext.userId = Number(pending?.userId || 0);
+          }
+        } catch (_) {
+          cryptomusWebhookContext = null;
+        }
+      }
+      return verified;
     };
     patched.__vaultxPatched = true;
     topup.verifyCryptomusWebhookSignature = patched;
