@@ -1,11 +1,13 @@
+const { USD_TO_RUB_RATE } = require("../config");
+
+const USD_TO_RUB = Number(USD_TO_RUB_RATE || 30);
 const CURRENCIES = {
-  USD: { code: "USD", symbol: "$", nameAr: "الدولار الأمريكي", nameEn: "US Dollar", rubPerUnit: 30 / 1 },
+  USD: { code: "USD", symbol: "$", nameAr: "الدولار الأمريكي", nameEn: "US Dollar", rubPerUnit: USD_TO_RUB },
   RUB: { code: "RUB", symbol: "₽", nameAr: "الروبل الروسي", nameEn: "Russian Ruble", rubPerUnit: 1 },
-  YER: { code: "YER", symbol: "ر.ي", nameAr: "الريال اليمني", nameEn: "Yemeni Rial", rubPerUnit: 30 / 53 },
-  SAR: { code: "SAR", symbol: "ر.س", nameAr: "الريال السعودي", nameEn: "Saudi Riyal", rubPerUnit: 30 / 3.7 },
+  YER: { code: "YER", symbol: "ر.ي", nameAr: "الريال اليمني", nameEn: "Yemeni Rial", rubPerUnit: USD_TO_RUB / 53 },
+  SAR: { code: "SAR", symbol: "ر.س", nameAr: "الريال السعودي", nameEn: "Saudi Riyal", rubPerUnit: USD_TO_RUB / 3.7 },
 };
 
-const USD_TO_RUB = 30;
 const DEFAULT_CURRENCY = "RUB";
 
 function normalizeCurrency(value) {
