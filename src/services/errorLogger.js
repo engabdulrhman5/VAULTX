@@ -5,6 +5,15 @@ const botErrors = [];
 const recentErrorMap = new Map();
 const DEDUPE_WINDOW_MS = 30 * 1000;
 
+function redactSecrets(value) {
+  let output = String(value || "");
+  const secrets = Object.entries(process.env)
+    .filter(([name, secret]) => /(?:TOKEN|SECRET|PASSWORD|API_KEY|MERCHANT_ID)/i.test(name) && String(secret || "").length >= 8)
+    .map(([, secret]) => secret);
+  for (const secret of secrets) output = output.replaceAll(secret, "[redacted]");
+  return output.replace(/([?&](?:api_key|key|token|password)=)[^&\s"']+/gi, "$1[redacted]");
+}
+
 function loadExistingErrors() {
   try {
     if (!fs.existsSync(BOT_ERRORS_PATH)) {
@@ -29,7 +38,7 @@ function persistErrors() {
 }
 
 function logBotError(scope, error, meta = {}) {
-  const message = error?.message || String(error);
+  const message = redactSecrets(error?.message || String(error));
   const dedupeKey = `${scope}::${message}`;
   const now = Date.now();
   const existing = recentErrorMap.get(dedupeKey);
@@ -41,8 +50,8 @@ function logBotError(scope, error, meta = {}) {
   const entry = {
     scope,
     message,
-    stack: error?.stack || null,
-    meta,
+    stack: error?.stack ? redactSecrets(error.stack) : null,
+    meta: JSON.parse(redactSecrets(JSON.stringify(meta || {}))),
     createdAt: new Date().toISOString(),
   };
 

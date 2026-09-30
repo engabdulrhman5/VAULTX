@@ -6,7 +6,7 @@ const {
   STORE_DB_PATH,
 } = require("../config");
 const { loadData, saveData } = require("./jsonStorage");
-const { normalizeCurrency, currencyToRub, rubToCurrency, CURRENCY_CODES } = require("./currencyService");
+const { normalizeCurrency, currencyToRub, rubToCurrency, convert, CURRENCY_CODES } = require("./currencyService");
 
 class AppStore {
   constructor() {
@@ -57,6 +57,12 @@ class AppStore {
       botStats: { ...defaults.botStats, ...(loaded.botStats || {}) },
       temporaryEmailInventory: { ...(loaded.temporaryEmailInventory || {}) },
     };
+    for (const service of Object.values(this.config.services)) {
+      // Existing configured prices are RUB; keep the field for older admin
+      // controls and persist the canonical USD value alongside it.
+      const legacyRub = Number(service.price || 0);
+      service.priceUsd = Number((legacyRub / 30).toFixed(6));
+    }
     this.transactions = loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || []);
     this.persistAll();
   }
@@ -73,11 +79,12 @@ class AppStore {
     const storedBalances = user?.balances && typeof user.balances === "object" ? { ...user.balances } : {};
     const balances = {};
     for (const code of CURRENCY_CODES) {
-      balances[code] = Number(storedBalances[code] || 0);
+      const value = Number(storedBalances[code] || 0);
+      balances[code] = Number.isFinite(value) && value >= 0 ? value : 0;
     }
     if (!user?.balances || typeof user.balances !== "object") {
       // Existing VAULTX balances were RUB. Preserve them as RUB during migration.
-      balances.RUB = legacyBalance;
+      balances.RUB = Number.isFinite(legacyBalance) && legacyBalance > 0 ? legacyBalance : 0;
     }
 
     const normalized = {
@@ -156,13 +163,13 @@ class AppStore {
     const invitedBy = options.invitedBy ? Number(options.invitedBy) : null;
     const existing = this.findUserById(telegramUser.id);
     if (existing) {
-      return this.updateUser(existing.userId, {
-        username: telegramUser.username || existing.username,
-        firstName: telegramUser.first_name || existing.firstName,
-        invitedBy: existing.invitedBy || invitedBy || null,
-        lastSeenAt: new Date().toISOString(),
-        isActive: true,
-      });
+      const username = telegramUser.username || existing.username;
+      const firstName = telegramUser.first_name || existing.firstName;
+      const referral = existing.invitedBy || invitedBy || null;
+      const lastSeen = Date.parse(existing.lastSeenAt || 0);
+      if (existing.username === username && existing.firstName === firstName && existing.invitedBy === referral &&
+          existing.isActive && Date.now() - lastSeen < 5 * 60 * 1000) return existing;
+      return this.updateUser(existing.userId, { username, firstName, invitedBy: referral, lastSeenAt: new Date().toISOString(), isActive: true });
     }
     return this.createUser(telegramUser, invitedBy);
   }
@@ -190,7 +197,7 @@ class AppStore {
     const user = this.findUserById(userId);
     if (!user) return null;
     const base = Number(amountRub || 0);
-    if (!Number.isFinite(base)) return user;
+    if (!Number.isFinite(base) || base <= 0) return null;
     user.balances[user.currency] = Number((user.balances[user.currency] + rubToCurrency(base, user.currency)).toFixed(6));
     user.lastSeenAt = new Date().toISOString();
     this.persistAll();
@@ -200,8 +207,12 @@ class AppStore {
   addBalanceInCurrency(userId, amount, currency) {
     const user = this.findUserById(userId);
     if (!user) return null;
+    if (!CURRENCY_CODES.includes(currency)) return null;
     const code = normalizeCurrency(currency);
-    user.balances[code] = Number((Number(user.balances[code] || 0) + Number(amount || 0)).toFixed(6));
+    const value = Number(amount);
+    const next = Number(user.balances[code] || 0) + value;
+    if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(next)) return null;
+    user.balances[code] = Number(Math.max(0, next).toFixed(6));
     user.lastSeenAt = new Date().toISOString();
     this.persistAll();
     return user;
@@ -212,7 +223,7 @@ class AppStore {
     if (!user) return null;
     const base = Number(amountRub || 0);
     const current = currencyToRub(user.balances[user.currency] || 0, user.currency);
-    if (!Number.isFinite(base) || current < base) return null;
+    if (!Number.isFinite(base) || base <= 0 || current + 1e-8 < base) return null;
     user.balances[user.currency] = Number(Math.max(0, rubToCurrency(current - base, user.currency)).toFixed(6));
     user.lastSeenAt = new Date().toISOString();
     this.persistAll();
@@ -224,9 +235,52 @@ class AppStore {
     const user = this.findUserById(userId);
     if (!user) return null;
     const current = Number(user.balances.USD || 0);
-    user.balances.USD = Number(Math.max(0, current - Number(amount || 0)).toFixed(6));
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || current + 1e-8 < Number(amount)) return null;
+    user.balances.USD = Number(Math.max(0, current - Number(amount)).toFixed(6));
     this.persistAll();
     return user;
+  }
+
+  transferInCurrency(senderId, receiverId, amount, currency) {
+    const sender = this.findUserById(senderId);
+    const receiver = this.findUserById(receiverId);
+    const value = Number(amount);
+    if (!sender || !receiver || sender === receiver || !CURRENCY_CODES.includes(currency) ||
+        !Number.isFinite(value) || value <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-9 ||
+        this.getBalance(senderId, currency) + 1e-8 < value) return false;
+    sender.balances[currency] = Number((this.getBalance(senderId, currency) - value).toFixed(6));
+    receiver.balances[currency] = Number((this.getBalance(receiverId, currency) + value).toFixed(6));
+    this.persistAll();
+    return true;
+  }
+
+  transferPreferred(senderId, receiverId, amountRub, from, to) {
+    const sender = this.findUserById(senderId);
+    const receiver = this.findUserById(receiverId);
+    const base = Number(amountRub);
+    if (!sender || !receiver || sender === receiver || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to) ||
+        !Number.isFinite(base) || base <= 0) return false;
+    const debit = rubToCurrency(base, from);
+    const credit = rubToCurrency(base, to);
+    if (this.getBalance(senderId, from) + 1e-8 < debit) return false;
+    sender.balances[from] = Number((this.getBalance(senderId, from) - debit).toFixed(6));
+    receiver.balances[to] = Number((this.getBalance(receiverId, to) + credit).toFixed(6));
+    this.persistAll();
+    return true;
+  }
+
+  convertBalance(userId, amount, from, to) {
+    const user = this.findUserById(userId);
+    const value = Number(amount);
+    if (!user || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to) || from === to ||
+        !Number.isFinite(value) || value <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-9 ||
+        this.getBalance(userId, from) + 1e-8 < value) return null;
+    const converted = Number(convert(value, from, to).toFixed(6));
+    if (!Number.isFinite(converted) || converted <= 0) return null;
+    user.balances[from] = Number((this.getBalance(userId, from) - value).toFixed(6));
+    user.balances[to] = Number((this.getBalance(userId, to) + converted).toFixed(6));
+    this.persistAll();
+    return converted;
   }
 
   addDeposit(userId, amount) {
@@ -279,7 +333,10 @@ class AppStore {
   getServices() { return this.config.services; }
   updateServicePrice(serviceKey, price) {
     if (!this.config.services[serviceKey]) return null;
-    this.config.services[serviceKey].price = Number(price);
+    const amountRub = Number(price);
+    if (!Number.isFinite(amountRub) || amountRub < 0) return null;
+    this.config.services[serviceKey].price = amountRub;
+    this.config.services[serviceKey].priceUsd = Number((amountRub / 30).toFixed(6));
     this.persistAll();
     return this.config.services[serviceKey];
   }
@@ -289,7 +346,13 @@ class AppStore {
     this.persistAll();
     return this.config.services[serviceKey];
   }
-  incrementRequestCount() { this.config.botStats.totalRequests += 1; this.persistAll(); }
+  incrementRequestCount() {
+    this.config.botStats.totalRequests += 1;
+    if (!this.lastStatsPersistAt || Date.now() - this.lastStatsPersistAt > 30 * 1000) {
+      this.lastStatsPersistAt = Date.now();
+      this.persistAll();
+    }
+  }
 
   addProfit(amount) {
     const normalized = Number(amount || 0);

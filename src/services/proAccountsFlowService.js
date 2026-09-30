@@ -597,7 +597,7 @@ function buildDurationsKeyboard(lang, category, app, plan) {
   for (const duration of durations) {
     const callback = `pro:dur:${category.key}:${app.key}:${plan.key}:${duration.key}`;
     rows.push([
-      { text: `${duration.price}$`, callback_data: callback },
+      { text: `${duration.price} RUB`, callback_data: callback },
       { text: lang === "ar" ? duration.label_ar : duration.label_en, callback_data: callback },
     ]);
   }
@@ -646,7 +646,7 @@ function buildSummaryText(lang, draft) {
       "♦️ ❨ فـاتـــورة تـأكـيـــد الـطـلـــب ❩ ♦️",
       [
         `🔹 الخدمة: ${escapeHtml(draft.appName)} - ${escapeHtml(draft.planName)} | ⏳ المدة: ${escapeHtml(draft.durationLabel)}`,
-        `⚙️ التفعيل: ${escapeHtml(draft.methodLabel)} | 💰 الإجمالي المطلوب: ${draft.price}$`,
+        `⚙️ التفعيل: ${escapeHtml(draft.methodLabel)} | 💰 الإجمالي المطلوب: ${draft.price} RUB`,
         "⚠️ يتم التنفيذ يدوياً للأمان (يستغرق 1 إلى 12 ساعة).",
       ],
       "⬇️ يرجى مراجعة طلبك والضغط على تأكيد لإتمامه ⬇️"
@@ -657,7 +657,7 @@ function buildSummaryText(lang, draft) {
     "♦️ ❨ ORDER CONFIRMATION INVOICE ❩ ♦️",
     [
       `🔹 Service: ${escapeHtml(draft.appName)} - ${escapeHtml(draft.planName)} | ⏳ Duration: ${escapeHtml(draft.durationLabel)}`,
-      `⚙️ Activation: ${escapeHtml(draft.methodLabel)} | 💰 Total: ${draft.price}$`,
+      `⚙️ Activation: ${escapeHtml(draft.methodLabel)} | 💰 Total: ${draft.price} RUB`,
       "⚠️ Manual secure execution (takes 1 to 12 hours).",
     ],
     "⬇️ Please review your request and press confirm ⬇️"
@@ -923,7 +923,7 @@ async function confirmOrder(bot, query, appStore) {
     `🏷️ Plan: ${escapeHtml(draft.planName)}`,
     `⏳ Duration: ${escapeHtml(draft.durationLabel)}`,
     `⚙️ Method: ${escapeHtml(draft.methodLabel)}`,
-    `💵 Total: ${draft.price}$`,
+    `💵 Total: ${draft.price} RUB`,
     draft.inputMode === "url"
       ? `🔗 URL: <code>${escapeHtml(draft.userInput || "-")}</code>`
       : `🔐 Credentials: <code>${escapeHtml(draft.userInput || "-")}</code>`,

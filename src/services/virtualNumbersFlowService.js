@@ -6,7 +6,8 @@ const { getUserLang, t } = require("../locales");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { getGrizzlyCountryMeta, getGrizzlyServiceCode, grizzlyServices } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
-const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber } = require("./grizzlyService");
+const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber, calculateVirtualNumberPrice } = require("./grizzlyService");
+const { rubToCurrency } = require("./currencyService");
 const fs = require("fs");
 const path = require("path");
 
@@ -570,7 +571,7 @@ function getVerifyUrl(appKey, number) {
 }
 
 function calculateSellPrice(apiPrice) {
-  return Math.ceil(Number(apiPrice) * 25 * 1.2);
+  return calculateVirtualNumberPrice(apiPrice);
 }
 
 function getCount(entry) {
@@ -597,7 +598,14 @@ async function getProviderCatalog(appKey, providerKey) {
     return [];
   }
 
-  return countries
+  // A fresh provider price response can contain newly added countries before
+  // the country-name snapshot is rebuilt. Use the live IDs as a fallback.
+  const knownProviderIds = new Set(countries.map((country) => String(country.providerCountryId || country.id)));
+  const liveCountries = countries.concat(Object.keys(prices)
+    .filter((id) => !knownProviderIds.has(String(id)))
+    .map((id) => normalizeCountryRecord({ id, providerCountryId: id })));
+
+  return liveCountries
     .map((country) => {
       const providerCountryId = String(country.providerCountryId || country.id);
       const apiPrice = extractPrice(prices, providerCountryId, serviceCode);
@@ -1083,6 +1091,15 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
   }
 
   const providerKey = serverKey === "server1" ? "server1" : "server2";
+  if (serverKey !== "server1" && serverKey !== "server2") return true;
+  const currentOffer = (await getProviderCatalog(appKey, providerKey))
+    .find((item) => String(item.countryId).toUpperCase() === String(countryId).toUpperCase());
+  if (!currentOffer || currentOffer.sellPrice !== priceValue) {
+    await safeTelegramCall("virtualNumbersFlow.handleBuy.stale", () =>
+      bot.answerCallbackQuery(query.id, { text: tx.noPrice, show_alert: true })
+    );
+    return true;
+  }
   const currentUser = appStore.findUserById(user.userId);
   if (!currentUser || Number(currentUser.balance) < priceValue) {
     await safeTelegramCall("virtualNumbersFlow.handleBuy.insufficient", () =>
@@ -1097,8 +1114,11 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
 
   const serviceCode = getServiceCode(appKey);
   const providerCountryId = resolveProviderCountryId(serverKey, countryId);
-  const response = await requestNumber(serviceCode, providerCountryId, providerKey);
+  const walletCurrency = currentUser.currency;
+  if (!appStore.deductBalance(currentUser.userId, priceValue)) return true;
+  const response = await requestNumber(serviceCode, providerCountryId, providerKey, { maxPriceUsd: currentOffer.supplierPrice });
   if (!response || /^(BAD_|ERROR|NO_)/i.test(response) || !String(response).includes("ACCESS_NUMBER")) {
+    appStore.addBalanceInCurrency(currentUser.userId, rubToCurrency(priceValue, walletCurrency), walletCurrency);
     await safeTelegramCall("virtualNumbersFlow.handleBuy.noNumbers", () =>
       bot.editMessageText(`🐼 ${tx.buyFailed}`, {
         chat_id: chatId,
@@ -1111,7 +1131,6 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
 
   const [, activationId, numberRaw] = String(response).split(":");
   const number = numberRaw.startsWith("+") ? numberRaw : `+${numberRaw}`;
-  appStore.deductBalance(currentUser.userId, priceValue);
   const dates = getDates();
   const countryMeta = getCountryLabel(lang, countryId);
   const appLabel = getAppLabel(lang, appKey);
@@ -1120,6 +1139,9 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
     type: "virtual_number_purchase",
     userId: currentUser.userId,
     amount: priceValue,
+    currency: "RUB",
+    walletCurrency,
+    status: "active",
     providerKey,
     serviceCode,
     appKey,
@@ -1172,6 +1194,8 @@ async function handleCode(bot, query, appStore, providerKey, activationId, appKe
   const user = appStore.getOrCreateUser(query.from);
   const lang = getUserLang(user);
   const tx = getText(lang);
+  const purchase = [...appStore.transactions].reverse().find((item) => item.type === "virtual_number_purchase" && String(item.activationId) === String(activationId));
+  if (!purchase || Number(purchase.userId) !== user.userId || purchase.providerKey !== providerKey) return true;
   const status = await getSmsStatus(activationId, providerKey);
   const parsed = parseStatusCode(status);
 
@@ -1227,18 +1251,23 @@ async function handleCode(bot, query, appStore, providerKey, activationId, appKe
 async function handleCancel(bot, query, appStore, providerKey, activationId, price) {
   const user = appStore.getOrCreateUser(query.from);
   const lang = getUserLang(user);
-  await cancelNumber(activationId, providerKey);
-  const amount = Number(price);
-  if (Number.isFinite(amount) && amount > 0) {
-    appStore.addBalance(user.userId, amount);
-    appStore.addTransaction({
-      type: "virtual_number_refund",
-      userId: user.userId,
-      amount,
-      providerKey,
-      activationId,
-    });
+  const purchase = [...appStore.transactions].reverse().find((item) => item.type === "virtual_number_purchase" && String(item.activationId) === String(activationId));
+  if (!purchase || Number(purchase.userId) !== user.userId || purchase.providerKey !== providerKey ||
+      !["active", "pending"].includes(purchase.status)) return false;
+  // Claim the refund before the provider call so concurrent callbacks cannot
+  // each credit the same order.
+  appStore.updateTransactionById(purchase.id, { status: "cancellation_pending" });
+  const result = String(await cancelNumber(activationId, providerKey) || "");
+  if (!/^ACCESS_CANCEL\b/i.test(result)) {
+    appStore.updateTransactionById(purchase.id, { status: purchase.status });
+    await safeTelegramCall("virtualNumbersFlow.handleCancel.failed", () => bot.answerCallbackQuery(query.id, { text: lang === "ar" ? "تعذر الإلغاء من المزود" : "Provider did not confirm cancellation", show_alert: true }));
+    return false;
   }
+  const amount = Number(purchase.amount);
+  const walletCurrency = purchase.walletCurrency || user.currency;
+  appStore.updateTransactionById(purchase.id, { status: "refunded" });
+  appStore.addBalanceInCurrency(user.userId, rubToCurrency(amount, walletCurrency), walletCurrency);
+  appStore.addTransaction({ type: "virtual_number_refund", userId: user.userId, amount, currency: "RUB", walletCurrency, providerKey, activationId, status: "completed" });
 
   const text = getText(lang).cancelled.replace("{price}", formatPrice(amount));
   await safeTelegramCall("virtualNumbersFlow.handleCancel", () =>
@@ -1251,7 +1280,7 @@ async function handleCancel(bot, query, appStore, providerKey, activationId, pri
 }
 
 async function handleChange(bot, query, appStore, providerKey, activationId, price, appKey, countryId) {
-  await handleCancel(bot, query, appStore, providerKey, activationId, price);
+  if (!(await handleCancel(bot, query, appStore, providerKey, activationId, price))) return true;
   return handleBuy(bot, query, appStore, providerKey === "server1" ? "server1" : "server2", appKey, countryId, price);
 }
 
@@ -1722,4 +1751,3 @@ module.exports = {
   handleVirtualNumbersCallback,
   handleVirtualNumbersTextInput,
 };
-

@@ -21,6 +21,7 @@ const {
 const { sendOrEditMessage } = require("./profileService");
 const { safeTelegramCall } = require("./telegramSafe");
 const { formatRuble } = require("../utils/formatters");
+const { currencyToRub, formatCurrency } = require("./currencyService");
 const { t } = require("../locales");
 
 const CRYPTO_PAY_BASE_URL = "https://pay.crypt.bot/api";
@@ -77,6 +78,11 @@ function localToRub(methodKey, amountLocal) {
   const method = String(methodKey || "").toLowerCase();
   const cfg = getGatewayMethodConfig(method);
   if (!cfg || !Number.isFinite(amount) || amount <= 0) return 0;
+
+  const localCurrency = String(cfg.local_currency || "").toUpperCase();
+  if (["USD", "YER", "SAR", "RUB"].includes(localCurrency)) {
+    return Number(currencyToRub(amount, localCurrency).toFixed(2));
+  }
 
   if (method === "binance") {
     const rubPerUsd = Number(cfg.rub_per_unit || USD_TO_RUB_RATE || 30);
@@ -256,23 +262,22 @@ async function createCryptomusPayment(amountUsd, userId) {
 }
 
 function verifyCryptomusWebhookSignature(rawBody, signatureHeader) {
-  if (!CRYPTOMUS_API_KEY) return false;
-  if (!signatureHeader) return false;
-  const expected = cryptomusSignFromBodyString(rawBody, CRYPTOMUS_API_KEY);
-  return String(expected).toLowerCase() === String(signatureHeader).toLowerCase();
+  if (!CRYPTOMUS_API_KEY || !/^[a-f0-9]{32}$/i.test(String(signatureHeader || ""))) return false;
+  const expected = Buffer.from(cryptomusSignFromBodyString(rawBody, CRYPTOMUS_API_KEY), "hex");
+  const supplied = Buffer.from(signatureHeader, "hex");
+  return supplied.length === expected.length && crypto.timingSafeEqual(expected, supplied);
 }
 
 async function sendTopupHome(bot, chatId, options = {}) {
   const lang = options.lang || "ar";
   const balanceRub = Number(options.user?.balance || 0);
-  const balanceUsd = rubToUsd(balanceRub);
+  const selectedBalance = formatCurrency(balanceRub, options.user?.currency || "USD");
   const text = lang === "ar"
     ? [
       "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
       "━━━━━━━━━━━━━━━━━━━",
       "♦️ ❨ الـمـحـفـظـــة والـرصـيـــد ❩ ♦️",
-      `💵 رصيد المستخدم بالدولار: ${balanceUsd.toFixed(2)}$`,
-      `💰 رصيد المستخدم بالروبل: ${formatRuble(balanceRub)}₽`,
+      `💵 رصيدك بعملتك المختارة: ${selectedBalance}`,
       "💡 يمكنك شحن حسابك عبر بوابات الدفع الآمنة.",
       "💡 الرصيد لا يمتلك تاريخ صلاحية وسيبقى محفوظاً.",
       "━━━━━━━━━━━━━━━━━━━",
@@ -282,8 +287,7 @@ async function sendTopupHome(bot, chatId, options = {}) {
       "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
       "━━━━━━━━━━━━━━━━━━━",
       "♦️ ❨ W A L L E T   &   B A L A N C E ❩ ♦️",
-      `💵 User USD balance: ${balanceUsd.toFixed(2)}$`,
-      `💰 User RUB balance: ${formatRuble(balanceRub)}₽`,
+      `💵 Balance in your selected currency: ${selectedBalance}`,
       "💡 Top up your account via secure payment gateways.",
       "💡 Balance does not expire and stays in your wallet.",
       "━━━━━━━━━━━━━━━━━━━",

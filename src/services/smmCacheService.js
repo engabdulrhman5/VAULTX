@@ -9,6 +9,7 @@ const CACHE_FILE = path.join(__dirname, "..", "..", "smm_cache.json");
 const { SMM_API_URL, SMM_API_KEY } = process.env;
 const smmProxyUrl = String(process.env.SMM_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
 const smmNetworkOptions = getAxiosNetworkOptions(smmProxyUrl);
+let servicesMemory = null;
 
 function parseApiUrls(raw) {
   return String(raw || "")
@@ -30,10 +31,12 @@ function normalizeApiResponse(data) {
 }
 
 function loadCacheFile() {
+  if (servicesMemory) return servicesMemory;
   try {
     const raw = fs.readFileSync(CACHE_FILE, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.services) ? parsed.services : [];
+    servicesMemory = Array.isArray(parsed.services) ? parsed.services : [];
+    return servicesMemory;
   } catch (error) {
     return [];
   }
@@ -111,6 +114,8 @@ function buildEntry(apiService, previousEntry = null) {
     platformLabelAr: serviceInfo.platform.label_ar,
     platformLabelEn: serviceInfo.platform.label_en,
     rateUsdPer1000,
+    pricePerUnitUsd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3 / 1000).toFixed(8)) : (pricePerUnitRub === null ? null : pricePerUnitRub / 30),
+    pricePer1000Usd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3).toFixed(6)) : (pricePer1000Rub === null ? null : pricePer1000Rub / 30),
     pricePerUnitRub,
     pricePerUnitRubFormatted: pricePerUnitRub !== null ? pricePerUnitRub.toFixed(4) : previousEntry?.pricePerUnitRubFormatted || null,
     pricePer1000Rub,
@@ -168,6 +173,7 @@ async function fetchAndCacheSmmServices() {
       if (!mergedServices.length) return previousServices;
 
       fs.writeFileSync(CACHE_FILE, JSON.stringify({ fetchedAt: new Date().toISOString(), lastUpdated: new Date().toISOString(), services: mergedServices }, null, 2), "utf8");
+      servicesMemory = mergedServices;
       return mergedServices;
     } catch (error) {
       logBotError("fetchAndCacheSmmServices", error, { apiUrl });

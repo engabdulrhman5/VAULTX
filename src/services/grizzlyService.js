@@ -1,5 +1,5 @@
 const { logBotError } = require("./errorLogger");
-const { getGrizzlyServiceCode, getGrizzlyCountryMeta } = require("../constants/grizzly");
+const { getGrizzlyServiceCode, getGrizzlyCountryMeta, grizzlyServices } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
 const { getAxiosNetworkOptions } = require("../utils/network");
 const fs = require("fs");
@@ -9,6 +9,8 @@ const axios = require("axios");
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const GRIZZLY_PRICES_PAGE_SIZE = 36;
 const priceCache = new Map();
+const priceRequests = new Map();
+let fileCacheMemory = null;
 const VIRTUAL_CACHE_PATH = path.resolve(__dirname, "..", "..", "data", "virtual-number-cache.json");
 const REQUEST_TIMEOUT_MS = 15000;
 const DEBUG_HERO = String(process.env.DEBUG_HERO || "1") !== "0";
@@ -40,9 +42,11 @@ function parseProviderResponse(rawText) {
 }
 
 function readFileCache() {
+  if (fileCacheMemory) return fileCacheMemory;
   try {
     if (!fs.existsSync(VIRTUAL_CACHE_PATH)) return {};
-    return JSON.parse(fs.readFileSync(VIRTUAL_CACHE_PATH, "utf8") || "{}") || {};
+    fileCacheMemory = JSON.parse(fs.readFileSync(VIRTUAL_CACHE_PATH, "utf8") || "{}") || {};
+    return fileCacheMemory;
   } catch (error) {
     logBotError("grizzlyService.readFileCache", error);
     return {};
@@ -53,6 +57,7 @@ function writeFileCache(next) {
   try {
     fs.mkdirSync(path.dirname(VIRTUAL_CACHE_PATH), { recursive: true });
     fs.writeFileSync(VIRTUAL_CACHE_PATH, JSON.stringify(next, null, 2), "utf8");
+    fileCacheMemory = next;
   } catch (error) {
     logBotError("grizzlyService.writeFileCache", error);
   }
@@ -143,6 +148,9 @@ async function getProviderCountries(providerKey = "server2") {
 
 async function getServicePrices(serviceCode, providerKey = "server2", options = {}) {
   const cacheKey = getCacheKey(providerKey, serviceCode);
+  if (!serviceCode || !/^[a-z0-9]{1,12}$/i.test(String(serviceCode))) return null;
+  if (priceRequests.has(cacheKey)) return priceRequests.get(cacheKey);
+  const request = (async () => {
   try {
     const cached = priceCache.get(cacheKey);
     if (!options.forceRefresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data;
@@ -164,6 +172,22 @@ async function getServicePrices(serviceCode, providerKey = "server2", options = 
     logBotError("getServicePrices", error, { serviceCode, providerKey });
     return null;
   }
+  })();
+  priceRequests.set(cacheKey, request);
+  try { return await request; } finally { priceRequests.delete(cacheKey); }
+}
+
+async function refreshSelectedSmsPrices() {
+  const codes = [...new Set([...Object.values(grizzlyServices), "im", "pp", "hj"])];
+  const jobs = codes.flatMap((code) => ["server1", "server2"].map((provider) => [code, provider]));
+  // Bound concurrency so navigation calls aren't blocked behind a burst of API calls.
+  const workers = Array.from({ length: 4 }, async () => {
+    while (jobs.length) {
+      const [code, provider] = jobs.shift();
+      if (getSmsProvider(provider).apiKey) await getServicePrices(code, provider, { forceRefresh: true });
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function requestNumber(serviceCode, countryId, providerKey = "server2", options = {}) {
@@ -214,7 +238,8 @@ function extractPrice(prices, countryId, serviceCode) {
 function calculateVirtualNumberPrice(apiPriceUsd) {
   const usd = Number(apiPriceUsd);
   if (!Number.isFinite(usd) || usd <= 0) return 0;
-  return Number((usd * USD_TO_RUB).toFixed(2));
+  // Preserve the legacy whole-ruble sale price; the source cost is USD.
+  return Math.ceil(usd * USD_TO_RUB - 1e-9);
 }
 
 async function getGrizzlyVirtualNumberCatalog(appName, options = {}) {
@@ -235,6 +260,7 @@ async function getGrizzlyVirtualNumberCatalog(appName, options = {}) {
       providerKey,
       supplierPriceUsd: Number(supplierPriceUsd.toFixed(6)),
       supplierPrice: Number(supplierPriceUsd.toFixed(6)),
+      sellPriceUsd: calculateVirtualNumberPrice(supplierPriceUsd) / USD_TO_RUB,
       sellPrice: calculateVirtualNumberPrice(supplierPriceUsd),
       availableCount: Math.floor(availableCount),
       ...getGrizzlyCountryMeta(countryId),
@@ -262,4 +288,5 @@ module.exports = {
   getGrizzlyVirtualNumberCatalog,
   paginateVirtualNumberCountries,
   getProviderCountries,
+  refreshSelectedSmsPrices,
 };

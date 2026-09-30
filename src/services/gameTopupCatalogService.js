@@ -39,6 +39,19 @@ function loadState() {
     if (fs.existsSync(CACHE_FILE_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(CACHE_FILE_PATH, "utf8"));
       if (parsed && Array.isArray(parsed.games) && Array.isArray(parsed.categories)) {
+        if (parsed.version < GAME_TOPUP_CATALOG.version) {
+          // The old field was called priceRub but held USD package values.
+          parsed.games.forEach((game) => {
+            (game.packages || []).forEach((pkg) => { pkg.priceUsd = Number(pkg.priceUsd ?? pkg.priceRub); pkg.priceRub = pkg.priceUsd; });
+            if (game.custom) {
+              game.custom.unitPriceUsd = Number(game.custom.unitPriceUsd ?? game.custom.unitPriceRub);
+              game.custom.unitPriceRub = game.custom.unitPriceUsd;
+            }
+          });
+          parsed.version = GAME_TOPUP_CATALOG.version;
+          parsed.currency = "USD";
+          saveState(parsed);
+        }
         catalogState = parsed;
         return catalogState;
       }
@@ -54,7 +67,6 @@ function loadState() {
 
 function normalizeProviderOverrides(data) {
   if (!data || typeof data !== "object") return null;
-  if (data.games && typeof data.games === "object") return data.games;
   if (Array.isArray(data.games)) {
     const map = {};
     data.games.forEach((entry) => {
@@ -64,6 +76,7 @@ function normalizeProviderOverrides(data) {
     });
     return map;
   }
+  if (data.games && typeof data.games === "object") return data.games;
   return null;
 }
 
@@ -75,25 +88,25 @@ function applyGameOverride(baseGame, overrideGame) {
     updated.packages = baseGame.packages.map((pkg, index) => {
       const overridePkg = overrideGame.packages[index];
       if (!overridePkg || typeof overridePkg !== "object") return pkg;
-      const nextPrice = Number(overridePkg.priceRub);
+      const nextPrice = Number(overridePkg.priceUsd ?? overridePkg.priceRub);
       return {
         ...pkg,
         ...(overridePkg.units_ar ? { units_ar: String(overridePkg.units_ar) } : {}),
         ...(overridePkg.units_en ? { units_en: String(overridePkg.units_en) } : {}),
-        ...(Number.isFinite(nextPrice) && nextPrice > 0 ? { priceRub: Number(nextPrice) } : {}),
+        ...(Number.isFinite(nextPrice) && nextPrice > 0 ? { priceUsd: nextPrice, priceRub: nextPrice } : {}),
       };
     });
   }
 
   if (overrideGame.custom && typeof overrideGame.custom === "object") {
-    const customPrice = Number(overrideGame.custom.unitPriceRub);
+    const customPrice = Number(overrideGame.custom.unitPriceUsd ?? overrideGame.custom.unitPriceRub);
     const customMin = Number(overrideGame.custom.min);
     const customMax = Number(overrideGame.custom.max);
     updated.custom = {
       ...baseGame.custom,
       ...(overrideGame.custom.unitLabelAr ? { unitLabelAr: String(overrideGame.custom.unitLabelAr) } : {}),
       ...(overrideGame.custom.unitLabelEn ? { unitLabelEn: String(overrideGame.custom.unitLabelEn) } : {}),
-      ...(Number.isFinite(customPrice) && customPrice > 0 ? { unitPriceRub: customPrice } : {}),
+      ...(Number.isFinite(customPrice) && customPrice > 0 ? { unitPriceUsd: customPrice, unitPriceRub: customPrice } : {}),
       ...(Number.isFinite(customMin) && customMin > 0 ? { min: customMin } : {}),
       ...(Number.isFinite(customMax) && customMax > 0 ? { max: customMax } : {}),
     };
@@ -176,4 +189,3 @@ module.exports = {
   getCategoryByKey,
   getGamesByCategory,
 };
-

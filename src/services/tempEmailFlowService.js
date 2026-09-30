@@ -47,7 +47,7 @@ function buildConfirmCard(lang, email, price) {
       "━━━━━━━━━━━━━━━━━━",
       "♦️ ❨ تـأكـيـــد اخـتـيـــار الإيـمـيـــل ❩ ♦️",
       `📧 الإيميل المختار: ${escapeHtml(email)}`,
-      `💰 سعر الحساب الدائم: ${price}$`,
+      `💰 سعر الحساب الدائم: ${price} RUB`,
       "💡 سيتم خصم الرصيد وتسليمك كلمة المرور فوراً.",
       "━━━━━━━━━━━━━━━━━━",
       "⬇️ يرجى التأكيد لاستلام بيانات الدخول ⬇️",
@@ -59,7 +59,7 @@ function buildConfirmCard(lang, email, price) {
     "━━━━━━━━━━━━━━━━━━",
     "♦️ ❨ E M A I L  S E L E C T I O N  C O N F I R M A T I O N ❩ ♦️",
     `📧 Selected email: ${escapeHtml(email)}`,
-    `💰 Permanent account price: ${price}$`,
+    `💰 Permanent account price: ${price} RUB`,
     "💡 Balance will be charged and password delivered instantly.",
     "━━━━━━━━━━━━━━━━━━",
     "⬇️ Please confirm to receive login credentials ⬇️",
@@ -124,7 +124,7 @@ function buildCustomConfirmCard(lang, localName, price) {
       "━━━━━━━━━━━━━━━━━━",
       "♦️ ❨ تـأكـيـــد إنـشـــاء الإيـمـيـــل ❩ ♦️",
       `📧 الإيميل المطلوب: ${escapeHtml(email)}`,
-      `🟢 الحالة: متاح | 💰 السعر: ${price}$`,
+      `🟢 الحالة: متاح | 💰 السعر: ${price} RUB`,
       "💡 سيتم إنشاء الإيميل فوراً بعد التأكيد والخصم.",
       "━━━━━━━━━━━━━━━━━━",
       "⬇️ يرجى مراجعة الطلب والضغط على تأكيد ⬇️",
@@ -136,7 +136,7 @@ function buildCustomConfirmCard(lang, localName, price) {
     "━━━━━━━━━━━━━━━━━━",
     "♦️ ❨ C O N F I R M  E M A I L  C R E A T I O N ❩ ♦️",
     `📧 Requested email: ${escapeHtml(email)}`,
-    `🟢 Status: Available | 💰 Price: ${price}$`,
+    `🟢 Status: Available | 💰 Price: ${price} RUB`,
     "💡 Email will be created instantly after confirmation.",
     "━━━━━━━━━━━━━━━━━━",
     "⬇️ Review your request and confirm ⬇️",
@@ -152,7 +152,7 @@ function buildNoStockText(lang, option) {
 
 function buildGroupKeyboard(group, lang) {
   const buttons = group.options.map((option) => [{
-    text: `${labelByLang(lang, option)} - ${option.price}$`,
+    text: `${labelByLang(lang, option)} - ${option.price} RUB`,
     callback_data: `te:opt:${option.sku}`,
   }]);
   return {
@@ -500,7 +500,7 @@ function buildAdminUploadInputText(lang, option) {
       "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
       "━━━━━━━━━━━━━━━━━━",
       "♦️ ❨ رفـــع حـســـاب جـديـــد ❩ ♦️",
-      `📌 الخدمة المختارة: ${option.arName} (${option.price}$)`,
+      `📌 الخدمة المختارة: ${option.arName} (${option.price} RUB)`,
       "💡 أرسل البيانات في سطرين بنفس الترتيب:",
       "السطر الأول: اسم الحساب / الإيميل",
       "السطر الثاني: رمز الحساب / كلمة المرور",
@@ -513,7 +513,7 @@ function buildAdminUploadInputText(lang, option) {
     "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
     "━━━━━━━━━━━━━━━━━━",
     "♦️ ❨ U P L O A D  N E W  A C C O U N T ❩ ♦️",
-    `📌 Selected service: ${option.enName} (${option.price}$)`,
+    `📌 Selected service: ${option.enName} (${option.price} RUB)`,
     "💡 Send data using exactly two lines:",
     "Line 1: Account username/email",
     "Line 2: Account password/code",

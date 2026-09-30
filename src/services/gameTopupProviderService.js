@@ -11,10 +11,8 @@ async function executeGameTopupOrder({ game, playerId, packageItem = null, quant
 
   if (!apiUrl || !apiKey) {
     return {
-      success: true,
-      orderId: `LOCAL-${Date.now()}`,
-      provider: "local",
-      status: "completed_local",
+      success: false,
+      error: "provider_not_configured",
     };
   }
 
@@ -59,39 +57,14 @@ async function executeGameTopupOrder({ game, playerId, packageItem = null, quant
     }
   } catch (error) {
     logBotError("gameTopupProvider.execute.post", error, { gameKey: game?.key });
+    // A timeout may occur after the provider accepted an order. A second GET
+    // would create a duplicate purchase, so leave it for reconciliation.
+    return { success: false, error: "provider_unconfirmed" };
   }
-
-  try {
-    const response = await axios.get(apiUrl, {
-      timeout: 20000,
-      params: payload,
-    });
-    const data = response?.data;
-    if (data && (data.order || data.id)) {
-      return {
-        success: true,
-        orderId: String(data.order || data.id),
-        provider: "remote",
-        status: "created",
-        raw: data,
-      };
-    }
-    return {
-      success: false,
-      error: String(data?.error || "provider_error"),
-      raw: data,
-    };
-  } catch (error) {
-    logBotError("gameTopupProvider.execute.get", error, { gameKey: game?.key });
-    return {
-      success: false,
-      error: "network_error",
-    };
-  }
+  return { success: false, error: "provider_error" };
 }
 
 module.exports = {
   isProviderConfigured,
   executeGameTopupOrder,
 };
-

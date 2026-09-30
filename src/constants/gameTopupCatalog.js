@@ -7,15 +7,16 @@ const GAME_TOPUP_CATEGORIES = [
   { key: "platform_anime", emoji: "🎮", name_ar: "بطاقات المنصات والأنمي", name_en: "Platforms & Anime Gacha" },
 ];
 
-function pkg(unitsAr, unitsEn, priceRub) {
-  return { units_ar: unitsAr, units_en: unitsEn, priceRub: Number(priceRub) };
+function pkg(unitsAr, unitsEn, priceUsd) {
+  return { units_ar: unitsAr, units_en: unitsEn, priceUsd: Number(priceUsd), priceRub: Number(priceUsd) };
 }
 
-function custom(unitLabelAr, unitLabelEn, unitPriceRub, min, max) {
+function custom(unitLabelAr, unitLabelEn, unitPriceUsd, min, max) {
   return {
     unitLabelAr,
     unitLabelEn,
-    unitPriceRub: Number(unitPriceRub),
+    unitPriceUsd: Number(unitPriceUsd),
+    unitPriceRub: Number(unitPriceUsd),
     min: Number(min),
     max: Number(max),
   };
@@ -62,7 +63,7 @@ const GAME_TOPUP_GAMES = [
     pkg("475 VP", "475 VP", 5), pkg("1000 VP", "1000 VP", 10), pkg("2050 VP", "2050 VP", 20), pkg("3650 VP", "3650 VP", 35), pkg("5350 VP", "5350 VP", 50),
   ], custom("VP", "VP", 0.011, 475, 20000)),
   game("cs_steam", "shooters", "🔫", "كاونتر سترايك", "Counter Strike / Steam", [
-    pkg("رصيد 5$", "Balance 5$", 5), pkg("رصيد 10$", "Balance 10$", 10), pkg("رصيد 20$", "Balance 20$", 20), pkg("رصيد 50$", "Balance 50$", 50), pkg("رصيد 100$", "Balance 100$", 100),
+    pkg("رصيد لعبة USD 5", "USD 5 store credit", 5), pkg("رصيد لعبة USD 10", "USD 10 store credit", 10), pkg("رصيد لعبة USD 20", "USD 20 store credit", 20), pkg("رصيد لعبة USD 50", "USD 50 store credit", 50), pkg("رصيد لعبة USD 100", "USD 100 store credit", 100),
   ], custom("دولار", "USD", 1, 5, 200)),
   game("state_of_survival", "shooters", "🧟", "ستيت اوف سرفايفل", "State of Survival", [
     pkg("500 ألماس", "500 Diamonds", 5), pkg("1050 ألماس", "1050 Diamonds", 10), pkg("2200 ألماس", "2200 Diamonds", 20), pkg("5500 ألماس", "5500 Diamonds", 50), pkg("11500 ألماس", "11500 Diamonds", 100),
@@ -205,13 +206,13 @@ const GAME_TOPUP_GAMES = [
   ], custom("ياقوت", "Ruby", 0.4, 3, 5000)),
 
   game("psn_us", "platform_anime", "🎮", "بلايستيشن", "PlayStation (PSN US)", [
-    pkg("رصيد 10$", "Balance 10$", 10), pkg("رصيد 20$", "Balance 20$", 20), pkg("رصيد 50$", "Balance 50$", 50), pkg("رصيد 75$", "Balance 75$", 75), pkg("رصيد 100$", "Balance 100$", 100),
+    pkg("رصيد لعبة USD 10", "USD 10 store credit", 10), pkg("رصيد لعبة USD 20", "USD 20 store credit", 20), pkg("رصيد لعبة USD 50", "USD 50 store credit", 50), pkg("رصيد لعبة USD 75", "USD 75 store credit", 75), pkg("رصيد لعبة USD 100", "USD 100 store credit", 100),
   ], custom("دولار", "USD", 1, 10, 500)),
   game("xbox_us", "platform_anime", "❎", "اكس بوكس", "Xbox (US)", [
-    pkg("رصيد 10$", "Balance 10$", 10), pkg("رصيد 20$", "Balance 20$", 20), pkg("رصيد 50$", "Balance 50$", 50), pkg("رصيد 75$", "Balance 75$", 75), pkg("رصيد 100$", "Balance 100$", 100),
+    pkg("رصيد لعبة USD 10", "USD 10 store credit", 10), pkg("رصيد لعبة USD 20", "USD 20 store credit", 20), pkg("رصيد لعبة USD 50", "USD 50 store credit", 50), pkg("رصيد لعبة USD 75", "USD 75 store credit", 75), pkg("رصيد لعبة USD 100", "USD 100 store credit", 100),
   ], custom("دولار", "USD", 1, 10, 500)),
   game("nintendo", "platform_anime", "🍄", "نينتندو", "Nintendo", [
-    pkg("رصيد 10$", "Balance 10$", 10), pkg("رصيد 20$", "Balance 20$", 20), pkg("رصيد 35$", "Balance 35$", 35), pkg("رصيد 50$", "Balance 50$", 50), pkg("رصيد 100$", "Balance 100$", 100),
+    pkg("رصيد لعبة USD 10", "USD 10 store credit", 10), pkg("رصيد لعبة USD 20", "USD 20 store credit", 20), pkg("رصيد لعبة USD 35", "USD 35 store credit", 35), pkg("رصيد لعبة USD 50", "USD 50 store credit", 50), pkg("رصيد لعبة USD 100", "USD 100 store credit", 100),
   ], custom("دولار", "USD", 1, 10, 500)),
   game("gta_online", "platform_anime", "🏙️", "جي تي ايه", "GTA Online", [
     pkg("1.25M كاش", "1.25M Cash", 20), pkg("3.5M كاش", "3.5M Cash", 50), pkg("8M كاش", "8M Cash", 100), pkg("10M كاش", "10M Cash", 120), pkg("20M كاش", "20M Cash", 200),
@@ -234,8 +235,8 @@ const GAME_TOPUP_GAMES = [
 ];
 
 const GAME_TOPUP_CATALOG = {
-  version: 1,
-  currency: "RUB",
+  version: 2,
+  currency: "USD",
   categories: GAME_TOPUP_CATEGORIES,
   games: GAME_TOPUP_GAMES,
 };

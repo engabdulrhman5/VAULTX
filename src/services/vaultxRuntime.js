@@ -9,11 +9,11 @@ const { getUserLang, t } = require('../locales');
 const { safeTelegramCall } = require('./telegramSafe');
 const { CRYPTOMUS_MERCHANT_ID, CRYPTOMUS_API_KEY, PUBLIC_BASE_URL, USD_TO_RUB_RATE } = require('../config');
 
-const CURRENCY_RUB_PER_UNIT = { RUB: 1, USD: 30, YER: 30 / 53, SAR: 30 / 3.7 };
+const CURRENCY_RUB_PER_UNIT = { RUB: 1, USD: 30, YER: 30 / 530, SAR: 30 / 3.7 };
 const CURRENCY_DECIMALS = { RUB: 2, USD: 2, YER: 2, SAR: 2 };
 
 function currencyFromUser(user) {
-  return normalizeCurrency(user?.currency || 'RUB');
+  return normalizeCurrency(user?.currency || 'USD');
 }
 
 function amountToRub(amount, sourceCurrency) {
@@ -433,7 +433,8 @@ function patchCallbackRouting() {
 patchAppStore();
 patchTopupKeyboard();
 patchTopup();
-patchTelegramOutput();
+// Render prices once in vaultxCurrencyRuntime. Stacking Telegram message
+// wrappers converted already converted values a second time.
 patchCallbackRouting();
 
 module.exports = { replaceMoney, formatDisplay, amountToRub, rubToCurrency };

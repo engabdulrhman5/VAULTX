@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node -r ./src/services/vaultxRuntime.js -r ./src/services/vaultxCurrencyRuntime.js src/index.js",
-    "dev": "node --watch -r ./src/services/vaultxRuntime.js -r ./src/services/vaultxCurrencyRuntime.js src/index.js"
+    "dev": "node --watch -r ./src/services/vaultxRuntime.js -r ./src/services/vaultxCurrencyRuntime.js src/index.js",
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [
     "telegram",
@@ -18,5 +19,11 @@
     "dotenv": "^16.6.1",
     "imapflow": "^1.0.185",
     "node-telegram-bot-api": "^0.66.0"
+  },
+  "overrides": {
+    "@cypress/request": {
+      "qs": "^6.16.0",
+      "uuid": "^11.1.1"
+    }
   }
 }

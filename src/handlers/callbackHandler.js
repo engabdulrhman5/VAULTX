@@ -333,7 +333,7 @@ async function handleAdminCallbacks(bot, query, appStore) {
           if (!group) return true;
           const lang = getUserLang(appStore.findUserById(query.from.id));
           const rows = group.options.map((option) => ([{
-            text: `${lang === "ar" ? option.arName : option.enName} - ${option.price}$`,
+            text: `${lang === "ar" ? option.arName : option.enName} - ${option.price} RUB`,
             callback_data: `adte:sku:${option.sku}`,
           }]));
           rows.push([{ text: lang === "ar" ? "🔙 رجوع" : "🔙 Back", callback_data: "adte:root" }]);
@@ -1281,7 +1281,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
 module.exports = {
   handleCallbackQuery,
 };
-
 
 
 

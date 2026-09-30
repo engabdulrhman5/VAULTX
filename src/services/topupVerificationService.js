@@ -1,4 +1,5 @@
 ﻿const { ImapFlow } = require("imapflow");
+const crypto = require("crypto");
 const { logBotError } = require("./errorLogger");
 const { safeTelegramCall } = require("./telegramSafe");
 const { getUserLang } = require("../locales");
@@ -138,7 +139,7 @@ function detectMethodFromSms(payload) {
 
 function isSmsWebhookAuthorized(req, payload = {}) {
   if (!SMS_WEBHOOK_TOKEN) {
-    return true;
+    return false;
   }
 
   const headerToken = String(
@@ -148,7 +149,11 @@ function isSmsWebhookAuthorized(req, payload = {}) {
   const bodyToken = String(payload?.token || "").trim();
   const validToken = String(SMS_WEBHOOK_TOKEN || "").trim();
 
-  return [headerToken, queryToken, bodyToken].some((token) => token && token === validToken);
+  const expected = Buffer.from(validToken);
+  return [headerToken, queryToken, bodyToken].some((token) => {
+    const candidate = Buffer.from(token);
+    return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+  });
 }
 
 async function processSmsWebhook(bot, appStore, payload) {

@@ -20,14 +20,13 @@ function getLevelFromTransactions(count) {
 function buildWebAppUserSnapshot(user) {
   const normalized = user || {};
   const txCount = Number(normalized.transactionsCount || 0);
-  const balanceRub = Number(normalized.balance || 0);
-  const usdBalance = Number(normalized.usdBalance || 0);
+  const balances = Object.fromEntries(["USD", "RUB", "YER", "SAR"].map((code) => [code, Number(normalized.balances?.[code] || 0)]));
   return {
     id: Number(normalized.userId || 0),
     firstName: normalized.firstName || "User",
     username: normalized.username || "",
-    balanceRub,
-    balanceUsd: Number.isFinite(usdBalance) && usdBalance > 0 ? usdBalance : Number((balanceRub / 30).toFixed(2)),
+    currency: normalized.currency || "USD",
+    balances,
     level: getLevelFromTransactions(txCount),
     xp: Math.min(100, txCount * 5),
   };
@@ -54,6 +53,7 @@ function getWebAppTransactions(appStore, userId, limit = 10) {
     type: String(tx.type || tx.serviceKey || "transaction"),
     serviceKey: String(tx.serviceKey || ""),
     amount: Number(tx.amount || 0),
+    currency: String(tx.currency || tx.from || "RUB"),
     status: String(tx.status || "completed"),
     createdAt: String(tx.createdAt || ""),
   }));
@@ -63,8 +63,9 @@ function renderVaultXWebAppPage(req, res, appStore) {
   const lang = String(req?.query?.lang || "ar").toLowerCase() === "en" ? "en" : "ar";
   const initialScreen = String(req?.query?.screen || "dashboard").toLowerCase();
   const initialMethod = String(req?.query?.method || "").toLowerCase();
-  const userId = Number(req?.query?.user_id || 0);
-  const user = appStore.findUserById(userId) || null;
+  // The page is public; private profile data is fetched after initData verification.
+  const userId = 0;
+  const user = null;
 
   const paymentMethods = ["binance", "jeeb", "vodafone"]
     .map((key) => {
