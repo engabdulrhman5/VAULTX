@@ -5,5 +5,7 @@ node_modules/
 npm-debug.log*
 runtime/
 data/*.log
+data/vaultx-state.json
+data/*.tmp
 python_vaultx/__pycache__/
 *.pyc

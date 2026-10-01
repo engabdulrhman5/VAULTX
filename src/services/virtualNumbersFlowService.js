@@ -8,6 +8,7 @@ const { getGrizzlyCountryMeta, getGrizzlyServiceCode, grizzlyServices } = requir
 const { getSmsProvider } = require("../constants/smsProviders");
 const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber, calculateVirtualNumberPrice } = require("./grizzlyService");
 const { rubToCurrency } = require("./currencyService");
+const { VIRTUAL_CACHE_PATH } = require("../config");
 const fs = require("fs");
 const path = require("path");
 
@@ -15,7 +16,6 @@ const PAGE_SIZE = 28;
 const OFFER_LIMIT = 38;
 const OTHER_APP_PAGE_SIZE = 16;
 const MOST_AVAILABLE_LIMIT = 80;
-const VIRTUAL_CACHE_PATH = path.resolve(__dirname, "..", "..", "data", "virtual-number-cache.json");
 const COUNTRY_CACHE_TTL = 24 * 60 * 60 * 1000;
 
 const APPS = [
@@ -262,10 +262,11 @@ function getServiceDisplay(lang, serviceCode) {
 
 function readVirtualCacheFile() {
   try {
-    if (!fs.existsSync(VIRTUAL_CACHE_PATH)) {
+    const source = fs.existsSync(VIRTUAL_CACHE_PATH) ? VIRTUAL_CACHE_PATH : path.resolve(__dirname, "../../data/virtual-number-cache.json");
+    if (!fs.existsSync(source)) {
       return {};
     }
-    return JSON.parse(fs.readFileSync(VIRTUAL_CACHE_PATH, "utf8") || "{}") || {};
+    return JSON.parse(fs.readFileSync(source, "utf8") || "{}") || {};
   } catch (error) {
     logBotError("virtualNumbersFlow.readVirtualCacheFile", error);
     return {};
@@ -591,7 +592,7 @@ function getEntry(prices, countryId, serviceCode) {
 
 async function getProviderCatalog(appKey, providerKey) {
   const serviceCode = getServiceCode(appKey);
-  const prices = await getServicePrices(serviceCode, providerKey);
+  const prices = await getServicePrices(serviceCode, providerKey, { cachedOnly: true });
   const countries = getProviderCountries(providerKey, serviceCode);
   const countryIndex = new Map(countries.map((item) => [String(item.id), item]));
   if (!prices || typeof prices !== "object") {
@@ -664,7 +665,7 @@ async function getOfferCatalog(appKey) {
 
 function getStaticCountryList() {
   const merged = ensureCountryLookup();
-  return [...merged.values()]
+  return [...new Map([...merged.values()].map((item) => [String(item.id), item])).values()]
     .sort((a, b) => Number(a.id) - Number(b.id))
     .map((item) => ({ countryId: String(item.id) }));
 }
@@ -887,6 +888,8 @@ function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback) {
       { text: `${index + 1}. ${row.label}`, callback_data: callback },
     ]);
   });
+
+  if (!rows.length) lines.push([{ text: lang === "ar" ? "🔄 تحديث القائمة" : "🔄 Refresh list", callback_data: `vnm:country:${appKey}:${countryId}:${page}` }]);
 
   lines.push([{ text: getText(lang).back, callback_data: backCallback }]);
   return { inline_keyboard: lines };
@@ -1390,6 +1393,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
     const messageId = query.message.message_id;
 
     if (raw === "service:virtual_numbers") {
+      await safeTelegramCall("virtualNumbersFlow.navigation.answer", () => bot.answerCallbackQuery(query.id));
       await sendOrEditMessage(
         bot,
         chatId,
@@ -1431,6 +1435,9 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
 
     const parts = data.split(":");
     const action = parts[1];
+    if (["app", "country", "offers", "best", "bestcountry", "searchpick", "more", "search"].includes(action)) {
+      await safeTelegramCall("virtualNumbersFlow.navigation.answer", () => bot.answerCallbackQuery(query.id));
+    }
 
     if (action === "app") {
       const appKey = normalizeAppKey(parts[2]);
@@ -1693,22 +1700,13 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
       setUserState(user.userId, "VN_CONTEXT", { vnApp: appKey, vnCountry: countryId, vnPage: page });
       const rows = await getCountryPriceRows(lang, appKey, countryId);
 
-      if (!rows.length) {
-        await safeTelegramCall("virtualNumbersFlow.country.noPrice", () =>
-          bot.answerCallbackQuery(query.id, { text: text.noPrice, show_alert: true })
-        );
-        return true;
-      }
-
       const country = getCountryLabel(lang, countryId);
       const body = [
         "💠  𝐕 𝐀 𝐔 𝐋 𝐓 - 𝐗  💠",
         "━━━━━━━━━━━━━━━━━━━",
         lang === "ar" ? "♦️ ❨ فـئـــة الـرقـــم والـسـعـــر ❩ ♦️" : "♦️ ❨ N U M B E R  T I E R  &  P R I C E ❩ ♦️",
         `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
-        lang === "ar" ? "💡 الباقات المتوفرة حالياً لهذه الدولة في جميع خوادمنا." : "💡 Current tiers for this country across all servers.",
-        lang === "ar" ? "💡 الباقات المرتفعة (VIP) تضمن لك وصول الكود أسرع." : "💡 Higher (VIP) tiers usually deliver code faster.",
-        lang === "ar" ? "💡 لا يتم خصم الرصيد إلا عند نجاح استلام كود الـ SMS." : "💡 Balance is charged only when purchase succeeds.",
+        rows.length ? (lang === "ar" ? "💡 أسعار المزودين محفوظة وتتحدث كل ٣٠ دقيقة؛ توفر الرقم النهائي يُتحقق منه عند الشراء." : "💡 Provider prices refresh every 30 minutes; final stock is checked at purchase.") : (lang === "ar" ? "لا توجد أسعار حديثة لهذه الدولة الآن. جرب التحديث أو اختر دولة أخرى." : "No recent prices for this country. Retry or choose another country."),
         "━━━━━━━━━━━━━━━━━━━",
         lang === "ar" ? "⬇️ يرجى اختيار فئة الرقم المناسبة لك لبدء التفعيل ⬇️" : "⬇️ Choose the suitable number tier to start activation ⬇️",
       ].join("\n");

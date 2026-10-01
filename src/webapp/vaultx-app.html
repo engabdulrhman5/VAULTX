@@ -95,7 +95,7 @@
     function esc(v){ return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
     function rub(v){ const n=Number(v||0);const digits=Math.abs(n-Number(n.toFixed(2)))>1e-8?6:2;return n.toLocaleString(undefined,{maximumFractionDigits:digits}); }
     function currency(){ return CODES.includes(state.user.currency) ? state.user.currency : 'USD'; }
-    function moneyUsd(v){ const n=Number(v||0)*RATES[currency()]; const digits=Math.abs(n-Number(n.toFixed(2)))>1e-8?6:2; return `${n.toLocaleString('en-US',{maximumFractionDigits:digits})} ${currency()}`; }
+    function moneyUsd(v){ const n=Number(v||0)*RATES[currency()]; if(!Number.isFinite(n)||n<=0)return `0.00 ${currency()}`; const digits=n>=1?2:Math.max(2,1-Math.floor(Math.log10(n)));const scale=10**Math.min(digits,12);const rounded=Math.ceil(Number(n.toPrecision(14))*scale-1e-10)/scale;return `${rounded.toLocaleString('en-US',{minimumFractionDigits:Math.min(digits,12),maximumFractionDigits:Math.min(digits,12)})} ${currency()}`; }
     function moneyRub(v){ return moneyUsd(Number(v||0)/30); }
     function currencyOptions(selected){ return CODES.map(code=>`<option value="${code}" ${selected===code?'selected':''}>${code}</option>`).join(''); }
     function toast(text, ok){ const d=document.createElement("div"); d.className=`fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm ${ok?"bg-emerald-500/20 border-emerald-400/40":"bg-rose-500/20 border-rose-400/40"}`; d.textContent=text; document.body.appendChild(d); setTimeout(()=>d.remove(),1600); }
@@ -164,7 +164,10 @@
     }
 
     function convert(){
-      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">${t.convert}</div><button data-action="go-settings" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3 flex gap-2"><select id="cvFrom" class="bg-black/70 rounded-lg px-2 py-2">${currencyOptions(currency())}</select><span>→</span><select id="cvTo" class="bg-black/70 rounded-lg px-2 py-2">${currencyOptions(currency()==='USD'?'YER':'USD')}</select></div><div class="glass rounded-2xl p-3"><input id="cvAmount" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.amount}"><button data-action="submit-convert" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.submitConvert}</button></div></section>`;
+      const pairs=['USD:YER','YER:USD','USD:SAR','SAR:USD','USD:RUB','RUB:USD'];
+      const preferred=currency()==='USD'?'USD:YER':`${currency()}:USD`;
+      const options=pairs.map(pair=>`<option value="${pair}" ${pair===preferred?'selected':''}>${pair.replace(':',' → ')}</option>`).join('');
+      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">${t.convert}</div><button data-action="go-settings" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><select id="cvPair" class="w-full bg-black/70 rounded-lg px-2 py-2">${options}</select></div><div class="glass rounded-2xl p-3"><input id="cvAmount" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.amount}"><button data-action="submit-convert" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.submitConvert}</button></div></section>`;
     }
 
     function virtualNumbers(){
@@ -273,7 +276,7 @@
       const oc=document.querySelector('[data-action="open-convert"]'); if(oc) oc.onclick=()=>{ state.view='convert'; render(); };
       const preferred=document.getElementById('preferredCurrency'); if(preferred) preferred.onchange=async()=>{try{const r=await apiFetch('/webapp/currency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currency:preferred.value})});const d=await r.json();if(!d.ok)throw Error();state.user=d.profile;render();toast(isAr?'تم تغيير العملة':'Currency changed',true);}catch(_){toast(isAr?'تعذر تغيير العملة':'Currency update failed',false);}};
       const tr=document.querySelector('[data-action="submit-transfer"]'); if(tr) tr.onclick=()=>submitTransfer(currency());
-      const cr=document.querySelector('[data-action="submit-convert"]'); if(cr) cr.onclick=()=>submitConvert(document.getElementById('cvFrom').value,document.getElementById('cvTo').value);
+      const cr=document.querySelector('[data-action="submit-convert"]'); if(cr) cr.onclick=()=>{const [from,to]=document.getElementById('cvPair').value.split(':');submitConvert(from,to);};
       document.querySelectorAll('[data-vn-app]').forEach(b=>b.onclick=async()=>{ state.vn.app=b.dataset.vnApp; await loadVnCountries(state.vn.app); render(); });
       document.querySelectorAll('[data-vn-country]').forEach(b=>b.onclick=()=>{ state.vn.selectedCountry=(state.vn.countries||[]).find(x=>String(x.id)===String(b.dataset.vnCountry))||null; render(); });
       document.querySelectorAll('[data-vn-buy]').forEach(b=>b.onclick=()=>buyVirtual(state.vn.app,b.dataset.vnBuy,b.dataset.vnProvider,Number(b.dataset.vnPrice||0)));

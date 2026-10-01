@@ -11,6 +11,14 @@ npm start
 
 Set `BOT_TOKEN` in `.env` before starting. `render.yaml` can deploy the same start command; the `/` endpoint returns `I am alive`.
 
+## Production wallet storage and deployment
+
+The current `render.yaml` specifies a **Free** web service. Render Free's local files are deleted on redeploy, restart, or spin-down. Do not use that plan to store customer balances. This bot now refuses to start on Render unless `VAULTX_DATA_DIR` is on a **real persistent disk mount**. An environment variable pointing at ephemeral storage is rejected. `render.persistent.example.yaml` shows a paid web service with a disk mounted at `/var/data/vaultx`; review its plan and cost before applying it. A disk can only be attached to one instance.
+
+Before the first deployment with the disk, copy the **latest** `users.json`, `config.json`, `transactions.json`, and `states.json` from the previous instance or a verified backup into that mount. If a `vaultx-state.json` snapshot exists, it takes precedence. Do not assume the JSON files committed to this public repository represent current balances. The old Render Free instance has no shell access; missing conversions must be reconciled against actual payment and Telegram receipts by an administrator. `VAULTX_BOOTSTRAP_FROM_BUNDLE=1` allows a one-time seed from committed files only when intentionally reconciled; remove it after the initial snapshot is created. The bot fails closed on an empty disk or corrupt snapshot instead of silently resetting balances.
+
+Wallets, settings, and transactions are written as one atomically replaced `vaultx-state.json` snapshot. `GET /health` reports the running Git revision and whether the storage path is configured. Verify the mounted disk and actual revision in Render before allowing new deposits. Keep one polling instance for the same Telegram token. Live provider availability and purchase/refund behavior still require a test with production API keys.
+
 ## Pricing and wallets
 
 USD is the pricing base. Fixed conversions are **1 USD = 30 RUB = 530 YER = 3.7 SAR**. New users choose USD, RUB, YER or SAR immediately after choosing a language and before CAPTCHA. They can change their preferred currency later in Settings or the Mini App.

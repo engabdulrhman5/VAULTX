@@ -4,15 +4,20 @@ const {
   CONFIG_DB_PATH,
   TRANSACTIONS_DB_PATH,
   STORE_DB_PATH,
+  STATE_SNAPSHOT_PATH,
+  DATA_DIR,
 } = require("../config");
 const { loadData, saveData } = require("./jsonStorage");
-const { normalizeCurrency, currencyToRub, rubToCurrency, convert, CURRENCY_CODES } = require("./currencyService");
+const fs = require("fs");
+const path = require("path");
+const { normalizeCurrency, currencyToRub, rubToCurrency, convert, canConvert, CURRENCY_CODES } = require("./currencyService");
 
 class AppStore {
   constructor() {
     this.users = [];
     this.config = this.getDefaultConfig();
     this.transactions = [];
+    global.__VAULTX_APP_STORE = this;
     this.loadAll();
   }
 
@@ -42,20 +47,36 @@ class AppStore {
   }
 
   loadAll() {
-    const legacyStore = loadData(STORE_DB_PATH, null);
-    this.users = loadData(USERS_DB_PATH, legacyStore?.users || []).map((user) => this.normalizeUser(user));
+    const snapshot = loadData(STATE_SNAPSHOT_PATH, null, { strict: true });
+    if (snapshot && (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.users) || !Array.isArray(snapshot.transactions) || !snapshot.config || typeof snapshot.config !== "object")) {
+      throw new Error("Invalid wallet snapshot; refusing to overwrite customer balances");
+    }
+    const hasLegacyStore = fs.existsSync(STORE_DB_PATH);
+    const parts = [USERS_DB_PATH, CONFIG_DB_PATH, TRANSACTIONS_DB_PATH];
+    const presentParts = parts.filter((file) => fs.existsSync(file)).length;
+    if (process.env.VAULTX_DATA_DIR && !snapshot && !hasLegacyStore && presentParts !== parts.length &&
+        !(presentParts === 0 && process.env.VAULTX_BOOTSTRAP_FROM_BUNDLE === "1")) {
+      throw new Error(`Incomplete wallet data in ${DATA_DIR}. Restore all three latest JSON files or explicitly seed an empty disk after reconciling balances.`);
+    }
+    const strictLegacy = Boolean(process.env.VAULTX_DATA_DIR);
+    const legacyStore = snapshot ? null : loadData(STORE_DB_PATH, null, { strict: strictLegacy });
+    const bundledDir = process.env.VAULTX_BOOTSTRAP_FROM_BUNDLE === "1" ? path.resolve(__dirname, "../../data") : null;
+    const bundled = bundledDir ? Object.fromEntries(["users", "config", "transactions"].map((name) => [name, path.join(bundledDir, `${name}.json`)])) : {};
+    this.users = (snapshot?.users || loadData(USERS_DB_PATH, legacyStore?.users || (bundled.users ? loadData(bundled.users, []) : []), { strict: strictLegacy })).map((user) => this.normalizeUser(user));
     const defaults = this.getDefaultConfig();
-    const loaded = loadData(
+    const loaded = snapshot?.config || loadData(
       CONFIG_DB_PATH,
-      legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : defaults
+      legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : (bundled.config ? loadData(bundled.config, defaults) : defaults),
+      { strict: strictLegacy }
     ) || {};
+    const configSource = snapshot?.config || loaded;
 
     this.config = {
       ...defaults,
-      ...loaded,
-      services: { ...defaults.services, ...(loaded.services || {}) },
-      botStats: { ...defaults.botStats, ...(loaded.botStats || {}) },
-      temporaryEmailInventory: { ...(loaded.temporaryEmailInventory || {}) },
+      ...configSource,
+      services: { ...defaults.services, ...(configSource.services || {}) },
+      botStats: { ...defaults.botStats, ...(configSource.botStats || {}) },
+      temporaryEmailInventory: { ...(configSource.temporaryEmailInventory || {}) },
     };
     for (const service of Object.values(this.config.services)) {
       // Existing configured prices are RUB; keep the field for older admin
@@ -63,14 +84,12 @@ class AppStore {
       const legacyRub = Number(service.price || 0);
       service.priceUsd = Number((legacyRub / 30).toFixed(6));
     }
-    this.transactions = loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || []);
+    this.transactions = snapshot?.transactions || loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || (bundled.transactions ? loadData(bundled.transactions, []) : []), { strict: strictLegacy });
     this.persistAll();
   }
 
   persistAll() {
-    saveData(USERS_DB_PATH, this.users);
-    saveData(CONFIG_DB_PATH, this.config);
-    saveData(TRANSACTIONS_DB_PATH, this.transactions);
+    saveData(STATE_SNAPSHOT_PATH, { schemaVersion: 1, users: this.users, config: this.config, transactions: this.transactions });
   }
 
   normalizeUser(user) {
@@ -272,14 +291,24 @@ class AppStore {
   convertBalance(userId, amount, from, to) {
     const user = this.findUserById(userId);
     const value = Number(amount);
-    if (!user || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to) || from === to ||
+    if (!user || !canConvert(from, to) ||
         !Number.isFinite(value) || value <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-9 ||
         this.getBalance(userId, from) + 1e-8 < value) return null;
     const converted = Number(convert(value, from, to).toFixed(6));
     if (!Number.isFinite(converted) || converted <= 0) return null;
-    user.balances[from] = Number((this.getBalance(userId, from) - value).toFixed(6));
-    user.balances[to] = Number((this.getBalance(userId, to) + converted).toFixed(6));
-    this.persistAll();
+    const originalFrom = this.getBalance(userId, from);
+    const originalTo = this.getBalance(userId, to);
+    user.balances[from] = Number((originalFrom - value).toFixed(6));
+    user.balances[to] = Number((originalTo + converted).toFixed(6));
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), type: "currency_conversion", userId: user.userId, amount: value, currency: from, targetCurrency: to, convertedAmount: converted, status: "completed" };
+    this.transactions.push(entry);
+    try { this.persistAll(); }
+    catch (error) {
+      user.balances[from] = originalFrom;
+      user.balances[to] = originalTo;
+      this.transactions.pop();
+      throw error;
+    }
     return converted;
   }
 

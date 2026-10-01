@@ -357,13 +357,14 @@ function patchTopupKeyboard() {
 async function showCurrencySelection(bot, query, user, mode = 'settings') {
   const lang = getUserLang(user || { language: 'ar' });
   if (mode === 'registration') setUserState(user.userId, 'AWAITING_CURRENCY', { language: lang });
-  await safeTelegramCall('currency.menu.answer', () => bot.answerCallbackQuery(query.id));
-  return safeTelegramCall('currency.menu.show', () => bot.editMessageText(
-    lang === 'ar'
+  const prompt = lang === 'ar'
       ? `💱 اختر عملتك المفضلة\n\nالعملة الحالية: ${currencyFromUser(user)}\n\nيمكنك تغييرها لاحقاً من الإعدادات.`
-      : `💱 Choose your preferred currency\n\nCurrent currency: ${currencyFromUser(user)}\n\nYou can change it later from Settings.`,
-    { chat_id: query.message?.chat?.id || query.from.id, message_id: query.message?.message_id, parse_mode: 'HTML', reply_markup: getCurrencyKeyboard(lang, currencyFromUser(user)) }
-  ));
+      : `💱 Choose your preferred currency\n\nCurrent currency: ${currencyFromUser(user)}\n\nYou can change it later from Settings.`;
+  const chatId = query.message?.chat?.id || query.from.id;
+  const options = { parse_mode: 'HTML', reply_markup: getCurrencyKeyboard(lang, currencyFromUser(user), mode === 'registration') };
+  const edited = await safeTelegramCall('currency.menu.show', () => bot.editMessageText(prompt, { chat_id: chatId, message_id: query.message?.message_id, ...options }));
+  if (!edited) await safeTelegramCall('currency.menu.fallback', () => bot.sendMessage(chatId, prompt, options));
+  return true;
 }
 
 async function handleCurrencyCallback(bot, query) {
@@ -373,6 +374,7 @@ async function handleCurrencyCallback(bot, query) {
   const user = store.getOrCreateUser(query.from);
 
   if (data === 'menu:change_currency') {
+    await safeTelegramCall('currency.menu.answer', () => bot.answerCallbackQuery(query.id));
     await showCurrencySelection(bot, query, user, 'settings');
     return true;
   }
@@ -387,10 +389,11 @@ async function handleCurrencyCallback(bot, query) {
     if (state?.name === 'AWAITING_CURRENCY' && !(updated || user).isVerified) {
       const code = String(Math.floor(10000 + Math.random() * 90000));
       setUserState(user.userId, 'AWAITING_CAPTCHA', { captchaCode: code });
-      await safeTelegramCall('currency.registration.captcha', () => bot.editMessageText(
-        [`<b>${t(lang, 'start_captcha_title')}</b>`, '', `${t(lang, 'start_captcha_prompt')} <code>${code}</code>`].join('\n'),
+      const challenge = [`<b>${t(lang, 'start_captcha_title')}</b>`, '', `${t(lang, 'start_captcha_prompt')} <code>${code}</code>`].join('\n');
+      const edited = await safeTelegramCall('currency.registration.captcha', () => bot.editMessageText(challenge,
         { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'HTML' }
       ));
+      if (!edited) await safeTelegramCall('currency.registration.fallback', () => bot.sendMessage(query.message.chat.id, challenge, { parse_mode: 'HTML' }));
       return true;
     }
     return true;
@@ -400,7 +403,10 @@ async function handleCurrencyCallback(bot, query) {
     const selectedLanguage = data === 'setlang_en' ? 'en' : 'ar';
     const updated = store.updateUser(user.userId, { language: selectedLanguage });
     await safeTelegramCall('currency.language.answer', () => bot.answerCallbackQuery(query.id, { text: selectedLanguage === 'ar' ? 'تم حفظ اللغة، اختر العملة الآن' : 'Language saved, choose your currency now' }));
-    if (!updated?.isVerified) return showCurrencySelection(bot, query, updated || user, 'registration');
+    if (!updated?.isVerified) {
+      await showCurrencySelection(bot, query, updated || user, 'registration');
+      return true;
+    }
     return false;
   }
 
@@ -437,4 +443,4 @@ patchTopup();
 // wrappers converted already converted values a second time.
 patchCallbackRouting();
 
-module.exports = { replaceMoney, formatDisplay, amountToRub, rubToCurrency };
+module.exports = { replaceMoney, formatDisplay, amountToRub, rubToCurrency, handleCurrencyCallback };

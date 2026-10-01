@@ -1,6 +1,8 @@
 const { logBotError } = require("./errorLogger");
 const { getGrizzlyServiceCode, getGrizzlyCountryMeta, grizzlyServices } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
+const { VIRTUAL_CACHE_PATH } = require("../config");
+const { saveData } = require("./jsonStorage");
 const { getAxiosNetworkOptions } = require("../utils/network");
 const fs = require("fs");
 const path = require("path");
@@ -11,7 +13,7 @@ const GRIZZLY_PRICES_PAGE_SIZE = 36;
 const priceCache = new Map();
 const priceRequests = new Map();
 let fileCacheMemory = null;
-const VIRTUAL_CACHE_PATH = path.resolve(__dirname, "..", "..", "data", "virtual-number-cache.json");
+let cacheFlushTimer = null;
 const REQUEST_TIMEOUT_MS = 15000;
 const DEBUG_HERO = String(process.env.DEBUG_HERO || "1") !== "0";
 const USD_TO_RUB = 30;
@@ -44,8 +46,9 @@ function parseProviderResponse(rawText) {
 function readFileCache() {
   if (fileCacheMemory) return fileCacheMemory;
   try {
-    if (!fs.existsSync(VIRTUAL_CACHE_PATH)) return {};
-    fileCacheMemory = JSON.parse(fs.readFileSync(VIRTUAL_CACHE_PATH, "utf8") || "{}") || {};
+    const source = fs.existsSync(VIRTUAL_CACHE_PATH) ? VIRTUAL_CACHE_PATH : path.resolve(__dirname, "../../data/virtual-number-cache.json");
+    if (!fs.existsSync(source)) return {};
+    fileCacheMemory = JSON.parse(fs.readFileSync(source, "utf8") || "{}") || {};
     return fileCacheMemory;
   } catch (error) {
     logBotError("grizzlyService.readFileCache", error);
@@ -54,13 +57,14 @@ function readFileCache() {
 }
 
 function writeFileCache(next) {
-  try {
-    fs.mkdirSync(path.dirname(VIRTUAL_CACHE_PATH), { recursive: true });
-    fs.writeFileSync(VIRTUAL_CACHE_PATH, JSON.stringify(next, null, 2), "utf8");
-    fileCacheMemory = next;
-  } catch (error) {
-    logBotError("grizzlyService.writeFileCache", error);
-  }
+  fileCacheMemory = next;
+  if (cacheFlushTimer) return;
+  cacheFlushTimer = setTimeout(() => {
+    cacheFlushTimer = null;
+    try { saveData(VIRTUAL_CACHE_PATH, fileCacheMemory); }
+    catch (error) { logBotError("grizzlyService.writeFileCache", error); }
+  }, 1500);
+  cacheFlushTimer.unref?.();
 }
 
 function readCachedPrices(providerKey, serviceCode) {
@@ -149,6 +153,13 @@ async function getProviderCountries(providerKey = "server2") {
 async function getServicePrices(serviceCode, providerKey = "server2", options = {}) {
   const cacheKey = getCacheKey(providerKey, serviceCode);
   if (!serviceCode || !/^[a-z0-9]{1,12}$/i.test(String(serviceCode))) return null;
+  // Navigation never waits for a provider timeout. Background jobs refresh
+  // these USD prices every 30 minutes; checkout still calls getNumber live.
+  if (options.cachedOnly) {
+    const cached = priceCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data;
+    return readCachedPrices(providerKey, serviceCode);
+  }
   if (priceRequests.has(cacheKey)) return priceRequests.get(cacheKey);
   const request = (async () => {
   try {

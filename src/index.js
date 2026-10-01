@@ -11,7 +11,7 @@ const {
 const { AppStore } = require("./services/appStore");
 const { verifyInitData } = require("./services/webAppAuth");
 const { verifyCryptoPayWebhook } = require("./services/cryptoPayAuth");
-const { CURRENCY_CODES, convert } = require("./services/currencyService");
+const { CURRENCY_CODES, convert, canConvert } = require("./services/currencyService");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
 const { isNetworkPermissionError } = require("./utils/network");
@@ -373,6 +373,12 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
         return;
       }
 
+      if (req.method === "GET" && requestUrl.pathname === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ ok: true, revision: process.env.RENDER_GIT_COMMIT || "local", storagePathConfigured: Boolean(process.env.VAULTX_DATA_DIR) }));
+        return;
+      }
+
       if (req.method === "GET" && requestUrl.pathname === "/webapp/recharge") {
         renderGatewayWebAppPage(req, res);
         return;
@@ -491,7 +497,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           const to = String(payload?.to || "RUB").toUpperCase();
           const amount = Number(payload?.amount || 0);
           const user = appStore.findUserById(userId);
-          if (!user || !Number.isFinite(amount) || amount <= 0 || from === to || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to)) {
+          if (!user || !Number.isFinite(amount) || amount <= 0 || !canConvert(from, to)) {
             res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "invalid_convert_data" }));
             return;
@@ -503,8 +509,6 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
             return;
           }
-          appStore.addTransaction({ type: "wallet_convert", userId, from, to, amount, convertedAmount, status: "completed" });
-
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true }));
         } catch (error) {
