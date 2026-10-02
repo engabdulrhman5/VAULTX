@@ -136,7 +136,7 @@ test(`${launcher} direct entry boots currency callbacks and signed HTTP wallets 
   assert.equal(health.body.storageMode, "ephemeral");
   assert.equal(health.body.storagePathConfigured, false);
   assert.equal(health.body.revision, "integration-runtime-revision");
-  assert.equal(health.body.build, "2026-10-02-3");
+  assert.equal(health.body.build, "2026-10-02-4");
   assert.deepEqual(health.body.features.currencies, ["USD", "RUB", "YER", "SAR"]);
   assert.deepEqual(health.body.features.conversionPairs,
     [["USD", "YER"], ["YER", "USD"], ["USD", "SAR"], ["SAR", "USD"], ["USD", "RUB"], ["RUB", "USD"]]);
@@ -173,7 +173,7 @@ test(`${launcher} direct entry boots currency callbacks and signed HTTP wallets 
 
   pushMessage(101, "/version");
   const versionReply = await waitFor(() => telegramCalls.find((call) => call.method === "sendMessage"
-    && Number(call.chat_id) === 101 && call.text?.includes("2026-10-02-3")), "version command");
+    && Number(call.chat_id) === 101 && call.text?.includes("2026-10-02-4")), "version command");
   assert.ok(versionReply.text.includes("integration-runtime-revision".slice(0, 12)));
 
   pushMessage(303, "/start");
@@ -188,25 +188,24 @@ test(`${launcher} direct entry boots currency callbacks and signed HTTP wallets 
   pushMessage(303, captcha);
   await waitFor(() => readSnapshot().users.find((user) => user.userId === 303)?.isVerified, "CAPTCHA verification");
   const menu = await waitFor(() => [...telegramCalls].reverse().find((call) => Number(call.chat_id) === 303
-    && markupOf(call).inline_keyboard?.flat().some((button) => button.callback_data === "wallet:display:USD")), "verified main menu");
-  const walletRows = markupOf(menu).inline_keyboard.filter((row) => row.some((button) => button.callback_data?.startsWith("wallet:display:")));
-  assert.deepEqual(walletRows.map((row) => row.length), [2, 2]);
-  assert.deepEqual(walletRows.flat().map((button) => button.text), ["$ 0.00", "₽ 0.00", "ر.ي 0.00", "ر.س 0.00"]);
+    && markupOf(call).inline_keyboard?.flat().some((button) => button.callback_data === "service:virtual_numbers")), "verified main menu");
+  assert.match(menu.text, /\$ 0\.00  ·  ₽ 0\.00\nر\.ي 0\.00  ·  ر\.س 0\.00/);
+  assert.equal(markupOf(menu).inline_keyboard.flat().some((button) => button.callback_data?.startsWith("wallet:")), false);
   const beforeWalletTaps = structuredClone(readSnapshot().users.find((user) => user.userId === 303));
   const beforeWalletState = readStates()[303];
-  pushCallback(303, "wallet:display:USD", "passive-wallet-display");
-  await waitFor(() => telegramCalls.some((call) => call.method === "answerCallbackQuery"
-    && call.callback_query_id === "passive-wallet-display"), "passive wallet acknowledgment");
-  assert.deepEqual(readSnapshot().users.find((user) => user.userId === 303), beforeWalletTaps);
-  assert.deepEqual(readStates()[303], beforeWalletState);
-  const callsBeforeRetiredTap = telegramCalls.length;
-  pushCallback(303, "wallet:select:RUB", "retired-wallet-selection");
-  await waitFor(() => telegramCalls.slice(callsBeforeRetiredTap).find((call) => Number(call.chat_id) === 303
-    && markupOf(call).inline_keyboard?.flat().some((button) => button.callback_data === "wallet:display:USD")), "retired wallet menu refresh");
-  assert.ok(telegramCalls.some((call) => call.method === "answerCallbackQuery"
-    && call.callback_query_id === "retired-wallet-selection"));
-  assert.deepEqual(readSnapshot().users.find((user) => user.userId === 303), beforeWalletTaps);
-  assert.deepEqual(readStates()[303], beforeWalletState);
+  for (const [data, callbackId] of [["wallet:display:USD", "retired-wallet-display"], ["wallet:select:RUB", "retired-wallet-selection"]]) {
+    const callsBeforeRetiredTap = telegramCalls.length;
+    pushCallback(303, data, callbackId);
+    const refreshed = await waitFor(() => telegramCalls.slice(callsBeforeRetiredTap).find((call) => Number(call.chat_id) === 303
+      && markupOf(call).inline_keyboard?.flat().some((button) => button.callback_data === "service:virtual_numbers")), "retired wallet menu refresh");
+    assert.equal(refreshed.text, menu.text);
+    assert.equal(markupOf(refreshed).inline_keyboard.flat().some((button) => button.callback_data?.startsWith("wallet:")), false);
+    const acknowledgment = telegramCalls.find((call) => call.method === "answerCallbackQuery" && call.callback_query_id === callbackId);
+    assert.ok(acknowledgment);
+    assert.equal(acknowledgment.text, undefined);
+    assert.deepEqual(readSnapshot().users.find((user) => user.userId === 303), beforeWalletTaps);
+    assert.deepEqual(readStates()[303], beforeWalletState);
+  }
   pushCallback(303, "menu:currency", "settings-currency");
   await waitFor(() => telegramCalls.some((call) => call.method === "answerCallbackQuery" && call.callback_query_id === "settings-currency"), "currency menu acknowledgment");
   pushCallback(303, "currency:set:USD", "settings-currency-change");

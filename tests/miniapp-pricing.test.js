@@ -47,22 +47,23 @@ test('real SMM rows use per-unit RUB fields as prices and keep min/max as quanti
   assert.equal((vm.runInContext('convert()', context).match(/<option /g) || []).length, 6);
 });
 
-test('dashboard balance squares are display-only and Settings keeps currency selection', async () => {
+test('dashboard balances are plain header text and Settings keeps currency selection', async () => {
   const context = app();
   vm.runInContext("state.user={currency:'RUB',balances:{USD:1.23,RUB:2.34,YER:3.45,SAR:4.56}}", context);
   const header = vm.runInContext('topBar()', context);
-  const cells = [...header.matchAll(/<div data-balance="([A-Z]+)"[^>]*>[\s\S]*?<\/div>/g)];
-  assert.deepEqual(cells.map(cell => cell[1]), ['USD', 'RUB', 'YER', 'SAR']);
-  assert.match(header, /grid grid-cols-2/);
-  for (const cell of cells) {
-    assert.match(cell[0], /aspect-square/);
-    assert.match(cell[0], /border-vxline/);
-    assert.doesNotMatch(cell[0], /<button|data-wallet|aria-pressed|tabindex|role="button"|border-vxblue|✓/);
+  const balances = header.match(/<div data-header-balances[^>]*>[\s\S]*?<\/div>/)[0];
+  const values = [...balances.matchAll(/<span data-balance="([A-Z]+)"[^>]*>[\s\S]*?<\/span>/g)];
+  assert.deepEqual(values.map(value => value[1]), ['USD', 'RUB', 'YER', 'SAR']);
+  assert.match(balances, /grid grid-cols-2/);
+  assert.doesNotMatch(balances, /<button|data-wallet|aria-pressed|tabindex|role="button"|border|glass|bg-|rounded|aspect-square|✓/);
+  for (const value of values) {
+    assert.match(value[0], /dir="ltr"/);
   }
-  assert.match(cells[0][0], /\$ 1\.23/);
-  assert.match(cells[1][0], /₽ 2\.34/);
-  assert.match(cells[2][0], /ر\.ي 3\.45/);
-  assert.match(cells[3][0], /ر\.س 4\.56/);
+  assert.match(values[0][0], /\$ 1\.23/);
+  assert.match(values[1][0], /₽ 2\.34/);
+  assert.match(values[2][0], /ر\.ي 3\.45/);
+  assert.match(values[3][0], /ر\.س 4\.56/);
+  assert.ok(header.indexOf('data-header-balances') < header.indexOf('ID:'));
   assert.doesNotMatch(html, /data-wallet/);
   assert.match(vm.runInContext('settings()', context), /<select id="preferredCurrency"/);
 

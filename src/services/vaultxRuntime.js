@@ -377,17 +377,15 @@ async function handleCurrencyCallback(bot, query) {
       && !data.startsWith('wallet:select:')) return false;
   const store = global.__VAULTX_APP_STORE;
   if (!store || !query?.from?.id) return false;
-  // Balance cells are passive. Retired selection buttons only refresh their
-  // stale menu, preserving both the preferred currency and any pending flow.
+  // Retired balance buttons only refresh their stale menu, preserving both
+  // the preferred currency and any pending flow. Balances now live in text.
   if (data.startsWith('wallet:display:') || data.startsWith('wallet:select:')) {
     await safeTelegramCall('wallet.display.answer', () => bot.answerCallbackQuery(query.id));
-    if (data.startsWith('wallet:select:')) {
-      const existingUser = store.findUserById(query.from.id);
-      if (existingUser?.isVerified) {
-        const { sendMainMenu } = require('./profileService');
-        await sendMainMenu(bot, query.message?.chat?.id || query.from.id, existingUser,
-          { messageId: query.message?.message_id });
-      }
+    const existingUser = store.findUserById(query.from.id);
+    if (existingUser?.isVerified) {
+      const { sendMainMenu } = require('./profileService');
+      await sendMainMenu(bot, query.message?.chat?.id || query.from.id, existingUser,
+        { messageId: query.message?.message_id });
     }
     return true;
   }
