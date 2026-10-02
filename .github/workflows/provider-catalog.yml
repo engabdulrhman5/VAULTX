@@ -1,0 +1,57 @@
+name: Refresh public provider catalog
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-catalog
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    env:
+      CATALOG_INPUT_DIR: ${{ runner.temp }}/vaultx-catalog-input
+      CATALOG_OUTPUT_DIR: ${{ runner.temp }}/vaultx-catalog-output
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Read previous public catalog
+        shell: bash
+        run: |
+          mkdir -p "$CATALOG_INPUT_DIR"
+          if git fetch --depth=1 --no-tags origin provider-catalog:refs/remotes/origin/provider-catalog 2>/dev/null; then
+            for file in virtual-number-cache.json smm-services.json; do
+              git show "refs/remotes/origin/provider-catalog:catalog/$file" > "$CATALOG_INPUT_DIR/$file" 2>/dev/null || rm -f "$CATALOG_INPUT_DIR/$file"
+            done
+          fi
+      - name: Fetch public prices and service catalog
+        run: node scripts/refresh-public-catalog.js
+        env:
+          HERO_SMS_API_KEY: ${{ secrets.HERO_SMS_API_KEY }}
+          HERO_BASE_URLS: ${{ secrets.HERO_BASE_URLS }}
+          GRIZZLY_API_KEY: ${{ secrets.GRIZZLY_API_KEY }}
+          GRIZZLY_BASE_URLS: ${{ secrets.GRIZZLY_BASE_URLS }}
+          SMM_API_KEY: ${{ secrets.SMM_API_KEY }}
+          SMM_API_URL: ${{ secrets.SMM_API_URL }}
+      - name: Publish only sanitized catalog files
+        run: node scripts/publish-public-catalog.js
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HERO_SMS_API_KEY: ${{ secrets.HERO_SMS_API_KEY }}
+          GRIZZLY_API_KEY: ${{ secrets.GRIZZLY_API_KEY }}
+          SMM_API_KEY: ${{ secrets.SMM_API_KEY }}

@@ -6,11 +6,8 @@ const { getUserLang, t } = require("../locales");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { getGrizzlyCountryMeta, getGrizzlyServiceCode, grizzlyServices } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
-const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber, calculateVirtualNumberPrice } = require("./grizzlyService");
+const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber, calculateVirtualNumberPrice, getCachedPriceInfo, getVirtualCacheSnapshot, getVirtualCacheVersion } = require("./grizzlyService");
 const { rubToCurrency } = require("./currencyService");
-const { VIRTUAL_CACHE_PATH } = require("../config");
-const fs = require("fs");
-const path = require("path");
 
 const PAGE_SIZE = 28;
 const OFFER_LIMIT = 38;
@@ -106,6 +103,10 @@ let countryLookup = null;
 let countryLookupAt = 0;
 let unifiedCountriesLookup = null;
 let unifiedCountriesLookupAt = 0;
+let countryLookupVersion = -1;
+let unifiedCountriesLookupVersion = -1;
+const providerCatalogCache = new Map();
+const purchaseRequests = new Set();
 
 function getText(lang) {
   return lang === "ar"
@@ -261,16 +262,7 @@ function getServiceDisplay(lang, serviceCode) {
 }
 
 function readVirtualCacheFile() {
-  try {
-    const source = fs.existsSync(VIRTUAL_CACHE_PATH) ? VIRTUAL_CACHE_PATH : path.resolve(__dirname, "../../data/virtual-number-cache.json");
-    if (!fs.existsSync(source)) {
-      return {};
-    }
-    return JSON.parse(fs.readFileSync(source, "utf8") || "{}") || {};
-  } catch (error) {
-    logBotError("virtualNumbersFlow.readVirtualCacheFile", error);
-    return {};
-  }
+  return getVirtualCacheSnapshot();
 }
 
 function getSnapshotKey(providerKey) {
@@ -302,7 +294,7 @@ function getProviderSnapshotCountries(providerKey) {
 }
 
 function getUnifiedCountries() {
-  if (unifiedCountriesLookup && Date.now() - unifiedCountriesLookupAt < COUNTRY_CACHE_TTL) {
+  if (unifiedCountriesLookup && unifiedCountriesLookupVersion === getVirtualCacheVersion() && Date.now() - unifiedCountriesLookupAt < COUNTRY_CACHE_TTL) {
     return unifiedCountriesLookup;
   }
 
@@ -345,6 +337,7 @@ function getUnifiedCountries() {
 
   unifiedCountriesLookup = map;
   unifiedCountriesLookupAt = Date.now();
+  unifiedCountriesLookupVersion = getVirtualCacheVersion();
   return unifiedCountriesLookup;
 }
 
@@ -366,7 +359,7 @@ function normalizeCountryRecord(raw) {
 }
 
 function ensureCountryLookup() {
-  if (countryLookup && Date.now() - countryLookupAt < COUNTRY_CACHE_TTL) {
+  if (countryLookup && countryLookupVersion === getVirtualCacheVersion() && Date.now() - countryLookupAt < COUNTRY_CACHE_TTL) {
     return countryLookup;
   }
 
@@ -431,6 +424,7 @@ function ensureCountryLookup() {
 
   countryLookup = index;
   countryLookupAt = Date.now();
+  countryLookupVersion = getVirtualCacheVersion();
   return countryLookup;
 }
 
@@ -592,7 +586,12 @@ function getEntry(prices, countryId, serviceCode) {
 
 async function getProviderCatalog(appKey, providerKey) {
   const serviceCode = getServiceCode(appKey);
-  const prices = await getServicePrices(serviceCode, providerKey, { cachedOnly: true });
+  const prices = await getServicePrices(serviceCode, providerKey, { cachedOnly: true, refreshInBackground: true });
+  const priceInfo = getCachedPriceInfo(serviceCode, providerKey);
+  const cacheKey = `${providerKey}:${serviceCode}`;
+  const previous = providerCatalogCache.get(cacheKey);
+  const version = getVirtualCacheVersion();
+  if (previous && previous.version === version && previous.prices === prices && previous.stale === Boolean(priceInfo?.stale)) return previous.data;
   const countries = getProviderCountries(providerKey, serviceCode);
   const countryIndex = new Map(countries.map((item) => [String(item.id), item]));
   if (!prices || typeof prices !== "object") {
@@ -606,7 +605,7 @@ async function getProviderCatalog(appKey, providerKey) {
     .filter((id) => !knownProviderIds.has(String(id)))
     .map((id) => normalizeCountryRecord({ id, providerCountryId: id })));
 
-  return liveCountries
+  const catalog = liveCountries
     .map((country) => {
       const providerCountryId = String(country.providerCountryId || country.id);
       const apiPrice = extractPrice(prices, providerCountryId, serviceCode);
@@ -623,10 +622,14 @@ async function getProviderCatalog(appKey, providerKey) {
         supplierPrice: Number(apiPrice),
         sellPrice: calculateSellPrice(apiPrice),
         availableCount,
+        stalePrice: Boolean(priceInfo?.stale),
+        priceUpdatedAt: priceInfo?.at || null,
         country: countryIndex.get(String(country.id)) || normalizeCountryRecord({ id: String(country.id) }),
       };
     })
     .filter(Boolean);
+  providerCatalogCache.set(cacheKey, { version, prices, stale: Boolean(priceInfo?.stale), data: catalog });
+  return catalog;
 }
 
 async function getOfferCatalog(appKey) {
@@ -885,7 +888,7 @@ function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback) {
     const callback = `vnm:buy:${row.serverKey}:${appKey}:${countryId}:${safePrice}`;
     lines.push([
       { text: `₽ ${safePrice}`, callback_data: callback },
-      { text: `${index + 1}. ${row.label}`, callback_data: callback },
+      { text: `${row.stalePrice ? "⏱ " : ""}${index + 1}. ${row.label}`, callback_data: callback },
     ]);
   });
 
@@ -911,6 +914,7 @@ async function getCountryPriceRows(lang, appKey, countryId) {
     rows.push({
       serverKey: "server1",
       price: Number(s1.sellPrice),
+      stalePrice: s1.stalePrice,
       label: `${getCountryLabel(lang, normalizedCountry).flag} ${getCountryLabel(lang, normalizedCountry).name} • 1`,
     });
   }
@@ -918,6 +922,7 @@ async function getCountryPriceRows(lang, appKey, countryId) {
     rows.push({
       serverKey: "server2",
       price: Number(s2.sellPrice),
+      stalePrice: s2.stalePrice,
       label: `${getCountryLabel(lang, normalizedCountry).flag} ${getCountryLabel(lang, normalizedCountry).name} • 2`,
     });
   }
@@ -1051,6 +1056,21 @@ function resolveProviderCountryId(serverKey, countryId) {
 }
 
 async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, price) {
+  const userId = Number(query.from.id);
+  const lang = getUserLang(appStore.findUserById(userId));
+  const pending = (appStore.transactions || []).some((tx) => Number(tx.userId) === userId && ["pending", "provider_unconfirmed"].includes(tx.status) && tx.appKey === appKey && String(tx.countryId) === String(countryId));
+  if (purchaseRequests.has(userId) || pending) {
+    await safeTelegramCall("virtualNumbersFlow.handleBuy.inFlight", () => bot.answerCallbackQuery(query.id, {
+      text: pending ? (lang === "ar" ? "هذا الطلب قيد مراجعة المزود. تواصل مع الدعم قبل تكراره." : "This order needs provider review. Contact support before retrying.") : (lang === "ar" ? "طلبك قيد التنفيذ الآن." : "Your order is processing."), show_alert: true,
+    }));
+    return true;
+  }
+  purchaseRequests.add(userId);
+  try { return await executeBuy(bot, query, appStore, serverKey, appKey, countryId, price); }
+  finally { purchaseRequests.delete(userId); }
+}
+
+async function executeBuy(bot, query, appStore, serverKey, appKey, countryId, price) {
   const user = appStore.getOrCreateUser(query.from);
   const lang = getUserLang(user);
   const tx = getText(lang);
@@ -1117,11 +1137,25 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
 
   const serviceCode = getServiceCode(appKey);
   const providerCountryId = resolveProviderCountryId(serverKey, countryId);
-  const walletCurrency = currentUser.currency;
-  if (!appStore.deductBalance(currentUser.userId, priceValue)) return true;
+  const reservation = appStore.reservePurchase(currentUser.userId, priceValue, {
+    type: "virtual_number_purchase", serviceKey: "virtual_numbers", providerKey, serviceCode, appKey, countryId,
+  });
+  if (!reservation) return true;
+  const walletCurrency = reservation.walletCurrency;
   const response = await requestNumber(serviceCode, providerCountryId, providerKey, { maxPriceUsd: currentOffer.supplierPrice });
+  if (response === "PROVIDER_UNCONFIRMED") {
+    const pending = appStore.resolvePendingPurchase(reservation.id, { status: "provider_unconfirmed" });
+    setUserState(currentUser.userId, "VN_PROVIDER_UNCONFIRMED", { providerKey, appKey, countryId, transactionId: pending?.id, price: priceValue });
+    await safeTelegramCall("virtualNumbersFlow.handleBuy.unconfirmed", () => bot.editMessageText(
+      lang === "ar"
+        ? "⏳ انقطع اتصال المزود قبل تأكيد الطلب. المبلغ محجوز مؤقتًا والطلب مسجل للمراجعة. يرجى التواصل مع الدعم قبل تكرار الشراء."
+        : "⏳ The provider connection ended before order confirmation. Funds are reserved and the order is recorded for review. Contact support before buying again.",
+      { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: tx.back, callback_data: "menu:main" }]] } }
+    ));
+    return true;
+  }
   if (!response || /^(BAD_|ERROR|NO_)/i.test(response) || !String(response).includes("ACCESS_NUMBER")) {
-    appStore.addBalanceInCurrency(currentUser.userId, rubToCurrency(priceValue, walletCurrency), walletCurrency);
+    appStore.resolvePendingPurchase(reservation.id, { status: "refunded", providerError: String(response || "provider_rejected") });
     await safeTelegramCall("virtualNumbersFlow.handleBuy.noNumbers", () =>
       bot.editMessageText(`🐼 ${tx.buyFailed}`, {
         chat_id: chatId,
@@ -1138,12 +1172,7 @@ async function handleBuy(bot, query, appStore, serverKey, appKey, countryId, pri
   const countryMeta = getCountryLabel(lang, countryId);
   const appLabel = getAppLabel(lang, appKey);
 
-  appStore.addTransaction({
-    type: "virtual_number_purchase",
-    userId: currentUser.userId,
-    amount: priceValue,
-    currency: "RUB",
-    walletCurrency,
+  appStore.resolvePendingPurchase(reservation.id, {
     status: "active",
     providerKey,
     serviceCode,
@@ -1706,7 +1735,10 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         "━━━━━━━━━━━━━━━━━━━",
         lang === "ar" ? "♦️ ❨ فـئـــة الـرقـــم والـسـعـــر ❩ ♦️" : "♦️ ❨ N U M B E R  T I E R  &  P R I C E ❩ ♦️",
         `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
-        rows.length ? (lang === "ar" ? "💡 أسعار المزودين محفوظة وتتحدث كل ٣٠ دقيقة؛ توفر الرقم النهائي يُتحقق منه عند الشراء." : "💡 Provider prices refresh every 30 minutes; final stock is checked at purchase.") : (lang === "ar" ? "لا توجد أسعار حديثة لهذه الدولة الآن. جرب التحديث أو اختر دولة أخرى." : "No recent prices for this country. Retry or choose another country."),
+        rows.length ? (rows.some((row) => row.stalePrice)
+          ? (lang === "ar" ? "⏱ بعض الأسعار من آخر تحديث متاح؛ يجري تحديثها، ويُتحقق من السعر والتوفر عند الشراء." : "⏱ Some quotes are from the last available update; refresh is running, and price/stock are checked at purchase.")
+          : (lang === "ar" ? "💡 أسعار المزودين محفوظة وتتحدث كل ٣٠ دقيقة؛ توفر الرقم النهائي يُتحقق منه عند الشراء." : "💡 Provider prices refresh every 30 minutes; final stock is checked at purchase."))
+          : (lang === "ar" ? "لا توجد أسعار حديثة لهذه الدولة الآن. يجري تحديث القائمة؛ أعد المحاولة بعد قليل أو اختر دولة أخرى." : "No recent prices for this country. Refresh is running; retry shortly or choose another country."),
         "━━━━━━━━━━━━━━━━━━━",
         lang === "ar" ? "⬇️ يرجى اختيار فئة الرقم المناسبة لك لبدء التفعيل ⬇️" : "⬇️ Choose the suitable number tier to start activation ⬇️",
       ].join("\n");
@@ -1748,4 +1780,6 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
 module.exports = {
   handleVirtualNumbersCallback,
   handleVirtualNumbersTextInput,
+  getProviderCatalog,
+  getCountryPriceRows,
 };

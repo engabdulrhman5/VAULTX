@@ -5,15 +5,19 @@ const fs = require("fs");
 const DATA_DIR = process.env.VAULTX_DATA_DIR
   ? path.resolve(process.env.VAULTX_DATA_DIR)
   : path.join(__dirname, "..", "..", "data");
-if (process.env.RENDER && !process.env.VAULTX_DATA_DIR) {
+const REQUIRE_PERSISTENT_STORAGE = process.env.VAULTX_REQUIRE_PERSISTENT_STORAGE === "1";
+let STORAGE_MODE = process.env.RENDER ? "ephemeral" : "local";
+if (REQUIRE_PERSISTENT_STORAGE && !process.env.VAULTX_DATA_DIR) {
   throw new Error("VAULTX_DATA_DIR must point to a mounted persistent disk on Render. Refusing to run wallets on ephemeral storage.");
 }
 if (process.env.RENDER && process.env.VAULTX_DATA_DIR) {
   // An environment variable alone does not make a directory persistent.
   // Render mounts the disk at a non-root mount point visible in mountinfo.
-  const realPath = fs.realpathSync(DATA_DIR);
+  const realPath = fs.existsSync(DATA_DIR) ? fs.realpathSync(DATA_DIR) : DATA_DIR;
   const mounts = fs.readFileSync("/proc/self/mountinfo", "utf8").split("\n").map((line) => line.split(" ")[4]);
-  if (!mounts.some((mount) => mount && mount !== "/" && realPath === mount)) {
+  const mounted = mounts.some((mount) => mount && mount !== "/" && (realPath === mount || realPath.startsWith(`${mount}/`)));
+  if (mounted) STORAGE_MODE = "persistent";
+  if (REQUIRE_PERSISTENT_STORAGE && !mounted) {
     throw new Error(`VAULTX_DATA_DIR (${DATA_DIR}) is not on a mounted persistent disk`);
   }
 }
@@ -58,6 +62,8 @@ module.exports = {
   PRO_ACCOUNTS_CHANNEL_ID,
   ADMIN_CHANNEL_ID,
   DATA_DIR,
+  STORAGE_MODE,
+  REQUIRE_PERSISTENT_STORAGE,
   STATE_SNAPSHOT_PATH: path.join(DATA_DIR, "vaultx-state.json"),
   VIRTUAL_CACHE_PATH: path.join(DATA_DIR, "virtual-number-cache.json"),
   USERS_DB_PATH: path.join(DATA_DIR, "users.json"),

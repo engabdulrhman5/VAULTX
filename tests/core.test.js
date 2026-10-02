@@ -144,11 +144,11 @@ test("wallet snapshot survives a restart and invalid snapshots cannot reset bala
     const corrupt = run('new (require("./src/services/appStore").AppStore)();');
     assert.notEqual(corrupt.status, 0);
     const noDisk = spawnSync(process.execPath, ["-e", 'require("./src/config")'], {
-      cwd: path.join(__dirname, ".."), env: { ...process.env, RENDER: "true", VAULTX_DATA_DIR: "" }, encoding: "utf8",
+      cwd: path.join(__dirname, ".."), env: { ...process.env, RENDER: "true", VAULTX_REQUIRE_PERSISTENT_STORAGE: "1", VAULTX_DATA_DIR: "" }, encoding: "utf8",
     });
     assert.notEqual(noDisk.status, 0);
     const fakeDisk = spawnSync(process.execPath, ["-e", 'require("./src/config")'], {
-      cwd: path.join(__dirname, ".."), env: { ...process.env, RENDER: "true", VAULTX_DATA_DIR: directory }, encoding: "utf8",
+      cwd: path.join(__dirname, ".."), env: { ...process.env, RENDER: "true", VAULTX_REQUIRE_PERSISTENT_STORAGE: "1", VAULTX_DATA_DIR: directory }, encoding: "utf8",
     });
     assert.notEqual(fakeDisk.status, 0);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }

@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
 const {
@@ -7,6 +7,7 @@ const {
   ADMIN_CHANNEL_ID,
   PUBLIC_BASE_URL,
   TELEGRAM_WEBAPP_URL,
+  STORAGE_MODE,
 } = require("./config");
 const { AppStore } = require("./services/appStore");
 const { verifyInitData } = require("./services/webAppAuth");
@@ -23,6 +24,7 @@ const {
   getServicePrices,
   calculateVirtualNumberPrice,
   refreshSelectedSmsPrices,
+  refreshPublicSmsCatalog,
 } = require("./services/grizzlyService");
 const { getSmsProvider } = require("./constants/smsProviders");
 const { getGrizzlyServiceCode, getGrizzlyCountryMeta } = require("./constants/grizzly");
@@ -33,7 +35,7 @@ const {
   grizzlyCountries,
 } = require("./services/grizzlyCacheService");
 const { smmServices, getPlatform, getCategory, getServiceInfo } = require("./constants/smmServices");
-const { fetchAndCacheSmmServices, getCachedSmmServiceById, createSmmOrder } = require("./services/smmCacheService");
+const { fetchAndCacheSmmServices, refreshPublicSmmCatalog, getCachedSmmServiceById, createSmmOrder } = require("./services/smmCacheService");
 const { getGameTopupCatalog, getGamesByCategory, getGameByKey } = require("./services/gameTopupCatalogService");
 const { executeGameTopupOrder } = require("./services/gameTopupProviderService");
 const {
@@ -106,7 +108,7 @@ let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
 
 function resolveVaultXWebAppUrl() {
-  const version = String(process.env.WEBAPP_VERSION || "2026-04-28-2");
+  const version = String(process.env.WEBAPP_VERSION || "2026-10-02-1");
   const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
   if (explicit) {
     const hasQuery = explicit.includes("?");
@@ -181,30 +183,12 @@ async function handleCryptoWebhookEvent(event) {
     throw new Error(`Invalid converted RUB amount for invoice ${invoiceId}`);
   }
 
-  appStore.addBalance(userId, creditedRub);
-  appStore.addDeposit(userId, creditedRub);
-  const updatedUser = appStore.incrementTransactions(userId);
-
-  appStore.addTransaction({
-    type: "topup_crypto_paid",
-    userId,
-    amount: creditedRub,
-    method: `Crypto Pay (${paidAsset})`,
-    cryptoAsset: paidAsset,
-    cryptoPaidAmount: paidAmountRaw,
-    cryptoInvoiceId: invoiceId,
-    serviceKey: "balance_topup",
-  });
-
-  if (pendingTx && pendingTx.id) {
-    appStore.updateTransactionById(pendingTx.id, {
-      status: "paid",
-      paidAt: new Date().toISOString(),
-      paidAsset,
-      paidAmount: paidAmountRaw,
-      paidRub: creditedRub,
-    });
-  }
+  const updatedUser = appStore.settleTopup(pendingTx.id, {
+    type: "topup_crypto_paid", method: `Crypto Pay (${paidAsset})`,
+    cryptoAsset: paidAsset, cryptoPaidAmount: paidAmountRaw,
+    cryptoInvoiceId: invoiceId, serviceKey: "balance_topup",
+  }, { paidAsset, paidAmount: paidAmountRaw, paidRub: creditedRub });
+  if (!updatedUser) return { ok: true, duplicate: true };
 
   const lang = getUserLang(updatedUser || appStore.findUserById(userId) || { language: "ar" });
   await safeTelegramCall("cryptoWebhook.notifyUser", () =>
@@ -236,111 +220,87 @@ async function handleCryptoWebhookEvent(event) {
 }
 
 async function handleCryptomusWebhookEvent(rawBody, parsedPayload) {
-  const signature = parsedPayload?.__signature || "";
-  if (!verifyCryptomusWebhookSignature(rawBody, signature)) {
-    throw new Error("Invalid Cryptomus webhook signature");
-  }
-
-  const data = parsedPayload?.payload || parsedPayload?.result || parsedPayload;
-  const status = String(data?.status || "").toLowerCase();
-  if (status !== "paid" && status !== "paid_over") {
-    return { ok: true, ignored: true };
-  }
-
-  const orderId = String(data?.order_id || "");
-  const invoiceUuid = String(data?.uuid || data?.invoice_uuid || "");
-
-  if (!orderId) {
-    throw new Error("Cryptomus order_id is missing");
-  }
-
-  const duplicate = appStore.transactions.find((tx) =>
-    tx.type === "topup_cryptomus_paid"
-      && (String(tx.cryptomusOrderId || "") === orderId
-        || (invoiceUuid && String(tx.cryptomusInvoiceId || "") === invoiceUuid))
-  );
-  if (duplicate) {
-    return { ok: true, duplicate: true };
-  }
-
-  let userId = 0;
-  const pendingTx = appStore.transactions.find((tx) =>
-    tx.type === "topup_cryptomus_pending" && String(tx.cryptomusOrderId || "") === orderId
-  );
-
-  if (pendingTx?.userId) {
-    userId = Number(pendingTx.userId);
-  } else {
-    const pieces = orderId.split("_");
-    if (pieces.length >= 2) {
-      userId = Number(pieces[1]);
+  try {
+    const signature = parsedPayload?.__signature || "";
+    if (!verifyCryptomusWebhookSignature(rawBody, signature)) {
+      throw new Error("Invalid Cryptomus webhook signature");
     }
+
+    const data = parsedPayload?.payload || parsedPayload?.result || parsedPayload;
+    const status = String(data?.status || "").toLowerCase();
+    if (status !== "paid" && status !== "paid_over") {
+      return { ok: true, ignored: true };
+    }
+
+    const orderId = String(data?.order_id || "");
+    const invoiceUuid = String(data?.uuid || data?.invoice_uuid || "");
+
+    if (!orderId) {
+      throw new Error("Cryptomus order_id is missing");
+    }
+
+    const duplicate = appStore.transactions.find((tx) =>
+      tx.type === "topup_cryptomus_paid"
+        && (String(tx.cryptomusOrderId || "") === orderId
+          || (invoiceUuid && String(tx.cryptomusInvoiceId || "") === invoiceUuid))
+    );
+    if (duplicate) {
+      return { ok: true, duplicate: true };
+    }
+
+    const pendingTx = appStore.transactions.find((tx) =>
+      tx.type === "topup_cryptomus_pending" && String(tx.cryptomusOrderId || "") === orderId
+    );
+    if (!pendingTx || (invoiceUuid && pendingTx.cryptomusInvoiceId && String(pendingTx.cryptomusInvoiceId) !== invoiceUuid)) {
+      throw new Error("Unknown or mismatched Cryptomus invoice");
+    }
+    const userId = Number(pendingTx.userId);
+    const amountUsd = Number(data?.amount);
+    const expectedUsd = Number(pendingTx.amountUsd);
+    if (String(data?.currency || "").toUpperCase() !== "USD" ||
+        !Number.isFinite(amountUsd) || amountUsd <= 0 || !Number.isFinite(expectedUsd) || expectedUsd <= 0 ||
+        (status === "paid" && Math.abs(amountUsd - expectedUsd) > 0.01) ||
+        (status === "paid_over" && amountUsd + 0.01 < expectedUsd)) {
+      throw new Error("Cryptomus invoice amount or currency mismatch");
+    }
+    const amountRub = Number(pendingTx.amount);
+    const updatedUser = appStore.settleTopup(pendingTx.id, {
+      type: "topup_cryptomus_paid", amountUsd,
+      method: "Cryptomus Hosted Checkout", cryptomusOrderId: orderId,
+      cryptomusInvoiceId: invoiceUuid || undefined, serviceKey: "balance_topup",
+    }, { paidUsd: amountUsd, paidRub: amountRub });
+    if (!updatedUser) return { ok: true, duplicate: true };
+
+    const lang = getUserLang(updatedUser || appStore.findUserById(userId) || { language: "ar" });
+    await safeTelegramCall("cryptomusWebhook.notifyUser", () =>
+      bot.sendMessage(
+        userId,
+        lang === "ar"
+          ? `✅ تم شحن رصيدك بنجاح عبر Cryptomus\n💰 المبلغ: ${amountRub} RUB`
+          : `✅ Your balance has been topped up via Cryptomus\n💰 Amount: ${amountRub} RUB`
+      )
+    );
+
+    await notifyTopupChannel(bot, userId, amountRub, lang, "Cryptomus Hosted Checkout");
+
+    await safeTelegramCall("cryptomusWebhook.notifyAdmin", () =>
+      bot.sendMessage(
+        ADMIN_CHANNEL_ID,
+        [
+          "<b>Cryptomus Top-up Success</b>",
+          `User ID: <code>${userId}</code>`,
+          `Order ID: <code>${orderId}</code>`,
+          amountUsd > 0 ? `Amount: ${amountUsd} USD` : null,
+          `Credited: ${amountRub} RUB`,
+        ].filter(Boolean).join("\n"),
+        { parse_mode: "HTML", disable_notification: true }
+      )
+    );
+
+    return { ok: true };
+  } finally {
+    require("./services/vaultxRuntime").clearCryptomusWebhookContext();
   }
-
-  if (!Number.isFinite(userId) || userId <= 0) {
-    throw new Error(`Cannot resolve user from order_id: ${orderId}`);
-  }
-
-  const amountUsd = Number(data?.amount || data?.payment_amount_usd || pendingTx?.amountUsd || 0);
-  const amountRub = Number.isFinite(amountUsd) && amountUsd > 0
-    ? usdToRub(amountUsd)
-    : Number(pendingTx?.amount || 0);
-
-  if (!Number.isFinite(amountRub) || amountRub <= 0) {
-    throw new Error(`Invalid converted amount from Cryptomus webhook for order ${orderId}`);
-  }
-
-  appStore.addBalance(userId, amountRub);
-  appStore.addDeposit(userId, amountRub);
-  const updatedUser = appStore.incrementTransactions(userId);
-
-  appStore.addTransaction({
-    type: "topup_cryptomus_paid",
-    userId,
-    amount: amountRub,
-    amountUsd: amountUsd > 0 ? amountUsd : undefined,
-    method: "Cryptomus Hosted Checkout",
-    cryptomusOrderId: orderId,
-    cryptomusInvoiceId: invoiceUuid || undefined,
-    serviceKey: "balance_topup",
-  });
-
-  if (pendingTx?.id) {
-    appStore.updateTransactionById(pendingTx.id, {
-      status: "paid",
-      paidAt: new Date().toISOString(),
-      paidUsd: amountUsd > 0 ? amountUsd : undefined,
-      paidRub: amountRub,
-    });
-  }
-
-  const lang = getUserLang(updatedUser || appStore.findUserById(userId) || { language: "ar" });
-  await safeTelegramCall("cryptomusWebhook.notifyUser", () =>
-    bot.sendMessage(
-      userId,
-      lang === "ar"
-        ? `✅ تم شحن رصيدك بنجاح عبر Cryptomus\n💰 المبلغ: ${amountRub} RUB`
-        : `✅ Your balance has been topped up via Cryptomus\n💰 Amount: ${amountRub} RUB`
-    )
-  );
-
-  await notifyTopupChannel(bot, userId, amountRub, lang, "Cryptomus Hosted Checkout");
-
-  await safeTelegramCall("cryptomusWebhook.notifyAdmin", () =>
-    bot.sendMessage(
-      ADMIN_CHANNEL_ID,
-      [
-        "<b>Cryptomus Top-up Success</b>",
-        `User ID: <code>${userId}</code>`,
-        `Order ID: <code>${orderId}</code>`,
-        amountUsd > 0 ? `Amount: ${amountUsd} USD` : null,
-        `Credited: ${amountRub} RUB`,
-      ].filter(Boolean).join("\n"),
-      { parse_mode: "HTML", disable_notification: true }
-    )
-  );
-
-  return { ok: true };
 }
 
 const renderPort = Number(process.env.PORT || 0);
@@ -375,7 +335,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
 
       if (req.method === "GET" && requestUrl.pathname === "/health") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(JSON.stringify({ ok: true, revision: process.env.RENDER_GIT_COMMIT || "local", storagePathConfigured: Boolean(process.env.VAULTX_DATA_DIR) }));
+        res.end(JSON.stringify({ ok: true, revision: process.env.RENDER_GIT_COMMIT || "local", storageMode: STORAGE_MODE, storagePathConfigured: Boolean(process.env.VAULTX_DATA_DIR) }));
         return;
       }
 
@@ -456,24 +416,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             return;
           }
 
-          appStore.addTransaction({
-            type: "transfer_out",
-            userId: sender.userId,
-            targetUserId: receiver.userId,
-            amount,
-            currency,
-            status: "completed",
-          });
-          appStore.addTransaction({
-            type: "transfer_in",
-            userId: receiver.userId,
-            sourceUserId: sender.userId,
-            amount,
-            currency,
-            status: "completed",
-          });
-
-          await safeTelegramCall("webapp.transfer.notify.receiver", () =>
+          void safeTelegramCall("webapp.transfer.notify.receiver", () =>
             bot.sendMessage(
               receiver.userId,
               `💸 You received ${amount} ${currency} from user ${sender.userId}`
@@ -545,8 +488,8 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             return;
           }
           const [p1Raw, p2Raw] = await Promise.all([
-            getServicePrices(serviceCode, "server1"),
-            getServicePrices(serviceCode, "server2"),
+            getServicePrices(serviceCode, "server1", { cachedOnly: true, refreshInBackground: true }),
+            getServicePrices(serviceCode, "server2", { cachedOnly: true, refreshInBackground: true }),
           ]);
           const map = new Map();
           const pushFrom = (raw, providerKey) => {
@@ -672,7 +615,17 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           // All fallbacks must have the same price as the amount reserved.
           options = options.filter((option) => Number(option.sellPrice) === price);
           const walletCurrency = user.currency;
-          if (!appStore.deductBalance(userId, price)) {
+          const unresolved = appStore.transactions.find((tx) => Number(tx.userId) === userId &&
+            ["pending", "provider_unconfirmed"].includes(tx.status) && tx.type === "virtual_number_purchase" && tx.appName === appName && tx.countryId === countryId);
+          if (unresolved) {
+            res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: unresolved.id }));
+            return;
+          }
+          const reservation = appStore.reservePurchase(userId, price, {
+            type: "virtual_number_purchase", serviceKey: "virtual_numbers", appName, countryId, serviceCode,
+          });
+          if (!reservation) {
             res.writeHead(409, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
             return;
@@ -682,6 +635,12 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           for (const option of options) {
             const response = await requestNumber(serviceCode, countryId, option.providerKey || "server2", { maxPriceUsd: option.supplierPriceUsd });
             const text = String(response || "").trim();
+            if (text === "PROVIDER_UNCONFIRMED") {
+              appStore.resolvePendingPurchase(reservation.id, { status: "provider_unconfirmed", providerKey: option.providerKey });
+              res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: reservation.id }));
+              return;
+            }
             if (text && text.includes("ACCESS_NUMBER")) {
               const [, activationId, number] = text.split(":");
               acquired = {
@@ -697,14 +656,13 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           }
 
           if (!acquired) {
-            appStore.addBalanceInCurrency(userId, convert(price, "RUB", walletCurrency), walletCurrency);
+            appStore.resolvePendingPurchase(reservation.id, { status: "refunded", error: "provider_no_number" });
             res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "provider_no_number" }));
             return;
           }
 
-          appStore.incrementTransactions(user.userId);
-          appStore.addTransaction({
+          appStore.resolvePendingPurchase(reservation.id, {
             type: "virtual_number_purchase",
             userId: user.userId,
             serviceKey: "virtual_numbers",
@@ -827,23 +785,38 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             return;
           }
           const walletCurrency = user.currency;
-          if (!appStore.deductBalance(userId, total)) {
+          const unresolved = appStore.transactions.find((tx) => Number(tx.userId) === userId &&
+            ["pending", "provider_unconfirmed"].includes(tx.status) && tx.type === "social_boost_order" && tx.serviceId === serviceId && tx.link === link && tx.quantity === quantity);
+          if (unresolved) {
+            res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: unresolved.id }));
+            return;
+          }
+          const reservation = appStore.reservePurchase(userId, total, {
+            type: "social_boost_order", serviceKey: "social_boost", serviceId, link, quantity,
+          });
+          if (!reservation) {
             res.writeHead(409, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
             return;
           }
           let order;
           try { order = await createSmmOrder({ serviceId, link, quantity }); }
-          catch (error) { appStore.addBalanceInCurrency(userId, convert(total, "RUB", walletCurrency), walletCurrency); throw error; }
+          catch (error) { order = { success: false, error: "provider_unconfirmed" }; logBotError("webapp.smm.pending", error); }
           if (!order?.success) {
-            appStore.addBalanceInCurrency(userId, convert(total, "RUB", walletCurrency), walletCurrency);
+            if (order?.unconfirmed || ["provider_unconfirmed", "provider_error"].includes(order?.error)) {
+              appStore.resolvePendingPurchase(reservation.id, { status: "provider_unconfirmed" });
+              res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: reservation.id }));
+              return;
+            }
+            appStore.resolvePendingPurchase(reservation.id, { status: "refunded", error: order?.error || "provider_failed" });
             res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "provider_failed" }));
             return;
           }
-          appStore.incrementTransactions(userId);
-          appStore.addProfit(total);
-          appStore.addTransaction({
+          appStore.resolvePendingPurchase(reservation.id, {
+            status: "completed",
             type: "social_boost_order",
             userId,
             serviceKey: "social_boost",
@@ -857,6 +830,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           });
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, order_id: String(order.orderId || ""), charged_rub: total }));
+          try { appStore.addProfit(total); } catch (error) { logBotError("stats.smm.profit", error); }
         } catch (error) {
           logBotError("http.webapp.smm.order", error);
           res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -966,24 +940,39 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           }
 
           const walletCurrency = user.currency;
-          if (!Number.isFinite(totalRub) || totalRub <= 0 || !appStore.deductBalance(userId, totalRub)) {
+          const unresolved = appStore.transactions.find((tx) => Number(tx.userId) === userId &&
+            ["pending", "provider_unconfirmed"].includes(tx.status) && tx.type === "game_topup_order" && tx.gameKey === game.key && tx.playerId === playerId && tx.packageLabel === packageLabel);
+          if (unresolved) {
+            res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: unresolved.id }));
+            return;
+          }
+          const reservation = appStore.reservePurchase(userId, totalRub, {
+            type: "game_topup_order", serviceKey: "game_topup", gameKey: game.key, playerId, packageLabel, quantity: quantity || null,
+          });
+          if (!reservation) {
             res.writeHead(409, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: "insufficient_balance" }));
             return;
           }
           let order;
           try { order = await executeGameTopupOrder({ game, playerId, packageItem, quantity }); }
-          catch (error) { appStore.addBalanceInCurrency(userId, convert(totalRub, "RUB", walletCurrency), walletCurrency); throw error; }
+          catch (error) { order = { success: false, error: "provider_unconfirmed" }; logBotError("webapp.game.pending", error); }
           if (!order?.success) {
-            appStore.addBalanceInCurrency(userId, convert(totalRub, "RUB", walletCurrency), walletCurrency);
+            if (order?.unconfirmed || ["provider_unconfirmed", "provider_error"].includes(order?.error)) {
+              appStore.resolvePendingPurchase(reservation.id, { status: "provider_unconfirmed" });
+              res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "provider_unconfirmed", pending: true, transaction_id: reservation.id }));
+              return;
+            }
+            appStore.resolvePendingPurchase(reservation.id, { status: "refunded", error: order?.error || "provider_failed" });
             res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "provider_failed" }));
             return;
           }
 
-          appStore.incrementTransactions(userId);
-          appStore.addProfit(totalRub);
-          appStore.addTransaction({
+          appStore.resolvePendingPurchase(reservation.id, {
+            status: "completed",
             type: "game_topup_order",
             serviceKey: "game_topup",
             userId,
@@ -1002,6 +991,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           });
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, order_id: String(order.orderId || ""), charged_rub: totalRub, package_label: packageLabel }));
+          try { appStore.addProfit(totalRub); } catch (error) { logBotError("stats.game.profit", error); }
         } catch (error) {
           logBotError("http.webapp.game.order", error);
           res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -1154,13 +1144,20 @@ function buildSmsReceivedText(lang, { number, code, password = t(lang, "virtualN
   ].join("\n");
 }
 
-// cache is managed by grizzlyCacheService and SMM cache service
-fetchAndCachePrices();
-fetchAndCacheSmmServices();
-refreshSelectedSmsPrices();
-setInterval(fetchAndCachePrices, 30 * 60 * 1000).unref();
-setInterval(fetchAndCacheSmmServices, 30 * 60 * 1000).unref();
-setInterval(refreshSelectedSmsPrices, 30 * 60 * 1000).unref();
+// Public catalog seeds and live refresh run in the background; menus use memory.
+const refreshSmsCatalog = async () => {
+  await refreshPublicSmsCatalog();
+  await refreshSelectedSmsPrices();
+};
+const refreshSmmCatalog = async () => {
+  await refreshPublicSmmCatalog();
+  await fetchAndCacheSmmServices();
+};
+const runBackgroundRefresh = (name, refresh) => void refresh().catch((error) => logBotError(name, error));
+for (const [name, refresh] of [["refresh.countries", fetchAndCachePrices], ["refresh.sms", refreshSmsCatalog], ["refresh.smm", refreshSmmCatalog]]) {
+  runBackgroundRefresh(name, refresh);
+  setInterval(() => runBackgroundRefresh(name, refresh), 30 * 60 * 1000).unref();
+}
 
 bot.onText(/\/start(?:\s+(.+))?/, async (msg) => {
   try {

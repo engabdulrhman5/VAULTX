@@ -16,6 +16,8 @@ services:
       sizeGB: 1
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 24
+      - key: VAULTX_REQUIRE_PERSISTENT_STORAGE
+        value: "1"
       - key: VAULTX_DATA_DIR
         value: /var/data/vaultx

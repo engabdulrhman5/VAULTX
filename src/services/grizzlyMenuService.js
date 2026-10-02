@@ -50,7 +50,7 @@ async function sendGrizzlyCountriesMenu(bot, chatId, user, appLabelOrKey, page =
 
   if (!serviceCode) return sendOrEditMessage(bot, chatId, t(lang, "grizzly_price_error"), { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendGrizzlyCountriesMenu.unsupported");
 
-  const prices = await getServicePrices(serviceCode, providerKey);
+  const prices = await getServicePrices(serviceCode, providerKey, { cachedOnly: true, refreshInBackground: true });
   if (!prices) return sendOrEditMessage(bot, chatId, t(lang, "grizzly_price_error"), { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendGrizzlyCountriesMenu.noPrices");
 
   const list = getCountryList(lang, prices, serviceCode, currency);
@@ -76,7 +76,7 @@ async function sendGrizzlyCountryDetails(bot, chatId, user, serviceCode, country
   const lang = getUserLang(user);
   const currency = user?.currency || "USD";
   const providerKey = options.providerKey || "server2";
-  const prices = serviceCode ? await getServicePrices(serviceCode, providerKey) : null;
+  const prices = serviceCode ? await getServicePrices(serviceCode, providerKey, { cachedOnly: true, refreshInBackground: true }) : null;
   const apiPriceUsd = prices ? extractPrice(prices, countryId, serviceCode) : null;
   const priceText = apiPriceUsd === null ? t(lang, "grizzly_price_unavailable") : formatCurrency(calculateVirtualNumberPrice(apiPriceUsd), currency);
   const country = getGrizzlyCountryMeta(countryId);

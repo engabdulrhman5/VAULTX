@@ -1,4 +1,4 @@
-﻿const { sendOrEditMessage } = require("./profileService");
+const { sendOrEditMessage } = require("./profileService");
 const { getUserLang } = require("../locales");
 const { formatRuble, escapeHtml } = require("../utils/formatters");
 const { rubToCurrency } = require("./currencyService");
@@ -22,6 +22,7 @@ const {
 
 const USD_TO_RUB = 30;
 const FRAME = "━━━━━━━━━━━━━━━━━━━";
+const gameTopupOrdersInFlight = new Set();
 
 function topupCard(title, lines, footer) {
   return [
@@ -373,101 +374,70 @@ async function processTopupOrder(bot, msg, appStore, payload) {
   const user = appStore.findUserById(msg.from.id);
   if (!user) return true;
   const lang = getUserLang(user);
-  const catalog = await getGameTopupCatalog();
-  const game = getGameByKey(catalog, payload.gameKey);
-  if (!game) {
-    clearUserState(msg.from.id);
-    return true;
-  }
-
-  const totalPrice = Number(payload.totalPrice || 0);
-  if (!Number.isFinite(totalPrice) || totalPrice <= 0) {
-    clearUserState(msg.from.id);
-    await safeTelegramCall("gameTopup.invalidPrice", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ ط³ط¹ط± ط§ظ„ط·ظ„ط¨ ط؛ظٹط± طµط§ظ„ط­.", "â‌Œ Invalid order price."))
-    );
-    return true;
-  }
-
-  if (user.balance < totalPrice) {
-    await safeTelegramCall("gameTopup.insufficientBalance", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ ط±طµظٹط¯ظƒ ط؛ظٹط± ظƒط§ظپظچ ظ„ط¥طھظ…ط§ظ… ط§ظ„ط·ظ„ط¨.", "â‌Œ Insufficient balance."))
-    );
-    return true;
-  }
-
-  const walletCurrency = user.currency;
-  if (!appStore.deductBalance(user.userId, totalPrice)) return true;
-  let orderResult;
+  const reply = text => safeTelegramCall('gameTopup.orderNotice', () => bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' }));
+  const pendingNotice = id => reply(tr(lang,
+    `⏳ طلب الشحن قيد التحقق من المزود. المبلغ محجوز ولم يتم إرجاعه لتجنب تكرار الشحن.\nرقم المتابعة: <code>${escapeHtml(id)}</code>\nتواصل مع الدعم قبل إنشاء طلب آخر: @Engineeer000`,
+    `⏳ Your top-up is awaiting provider confirmation. The amount remains reserved to avoid a duplicate order.\nReference: <code>${escapeHtml(id)}</code>\nContact support before placing another order: @Engineeer000`));
+  if (gameTopupOrdersInFlight.has(user.userId)) { await reply(tr(lang, '⏳ طلبك قيد التنفيذ. انتظر نتيجة الطلب قبل المحاولة مجدداً.', '⏳ Your order is processing. Wait for its result before retrying.')); return true; }
+  gameTopupOrdersInFlight.add(user.userId);
+  let reserved = null;
   try {
-    orderResult = await executeGameTopupOrder({
-      game,
-      playerId: payload.playerId,
-      packageItem: payload.packageItem || null,
-      quantity: payload.quantity || null,
+    const catalog = await getGameTopupCatalog();
+    const game = getGameByKey(catalog, payload.gameKey);
+    if (!game) { clearUserState(user.userId); await reply(tr(lang, '❌ اللعبة غير متاحة حالياً.', '❌ This game is currently unavailable.')); return true; }
+    const totalPrice = Number(payload.totalPrice || 0);
+    if (!Number.isFinite(totalPrice) || totalPrice <= 0 || !String(payload.playerId || '').trim()) {
+      clearUserState(user.userId);
+      await reply(tr(lang, '❌ بيانات الطلب أو سعره غير صالح.', '❌ Invalid order details or price.'));
+      return true;
+    }
+    const duplicate = appStore.transactions.find(tx => tx.type === 'game_topup_order'
+      && Number(tx.userId) === Number(user.userId) && ['pending', 'provider_unconfirmed'].includes(tx.status)
+      && tx.gameKey === game.key && String(tx.playerId) === String(payload.playerId)
+      && String(tx.packageLabel || '') === String(payload.packageLabel || '') && Number(tx.quantity || 0) === Number(payload.quantity || 0));
+    if (duplicate) { clearUserState(user.userId); await pendingNotice(duplicate.id); return true; }
+    reserved = appStore.reservePurchase(user.userId, totalPrice, {
+      type: 'game_topup_order', serviceKey: 'game_topup', gameKey: game.key,
+      gameNameAr: game.name_ar, gameNameEn: game.name_en, playerId: payload.playerId,
+      packageLabel: payload.packageLabel, quantity: payload.quantity || null,
     });
-  } catch (error) {
-    appStore.addBalanceInCurrency(user.userId, rubToCurrency(totalPrice, walletCurrency), walletCurrency);
-    throw error;
-  }
-
-  if (!orderResult?.success) {
-    appStore.addBalanceInCurrency(user.userId, rubToCurrency(totalPrice, walletCurrency), walletCurrency);
-    await safeTelegramCall("gameTopup.orderFailed", () =>
-      bot.sendMessage(msg.chat.id, tr(lang, "â‌Œ طھط¹ط°ط± طھظ†ظپظٹط° ط§ظ„ط·ظ„ط¨ ظ…ظ† ط§ظ„ظ…ط²ظˆط¯ ط­ط§ظ„ظٹط§ظ‹.", "â‌Œ Provider could not process order now."))
-    );
-    return true;
-  }
-
-  appStore.incrementTransactions(user.userId);
-  appStore.addProfit(totalPrice);
-  appStore.addTransaction({
-    type: "game_topup_order",
-    serviceKey: "game_topup",
-    userId: user.userId,
-    amount: totalPrice,
-    currency: "RUB",
-    walletCurrency,
-    gameKey: game.key,
-    gameNameAr: game.name_ar,
-    gameNameEn: game.name_en,
-    playerId: payload.playerId,
-    packageLabel: payload.packageLabel,
-    quantity: payload.quantity || null,
-    providerOrderId: orderResult.orderId,
-    provider: orderResult.provider,
-    providerStatus: orderResult.status,
-  });
-
-  clearUserState(user.userId);
-
-  const providerStatus = orderResult.provider === "remote"
-    ? tr(lang, "طھظ… ط§ظ„ط¥ط±ط³ط§ظ„ ط¥ظ„ظ‰ ط§ظ„ظ…ط²ظˆط¯", "Submitted to provider")
-    : tr(lang, "طھظ… ط§ظ„ط­ط¬ط² ظ…ط­ظ„ظٹط§ظ‹ (ط¨ط¯ظˆظ† ظ…ط²ظˆط¯)", "Saved locally (provider disabled)");
-
-  await safeTelegramCall("gameTopup.orderSuccess", () =>
-    bot.sendMessage(
-      msg.chat.id,
+    if (!reserved) { await reply(tr(lang, '❌ رصيد محفظتك المختارة غير كافٍ لإتمام الطلب.', '❌ Your selected wallet has insufficient balance.')); return true; }
+    // The debit and pending ledger are persisted before making an external order.
+    clearUserState(user.userId);
+    let orderResult;
+    try {
+      orderResult = await executeGameTopupOrder({ game, playerId: payload.playerId, packageItem: payload.packageItem || null, quantity: payload.quantity || null });
+    } catch (error) {
+      logBotError('gameTopup.providerUnconfirmed', error, { userId: user.userId, transactionId: reserved.id });
+      orderResult = { success: false, error: 'provider_unconfirmed' };
+    }
+    if (!orderResult?.success) {
+      const ambiguous = !orderResult?.error || ['provider_unconfirmed', 'provider_error'].includes(orderResult.error);
+      appStore.resolvePendingPurchase(reserved.id, { status: ambiguous ? 'provider_unconfirmed' : 'refunded', providerError: String(orderResult?.error || 'provider_unconfirmed') });
+      if (ambiguous) await pendingNotice(reserved.id);
+      else await reply(tr(lang, '❌ رفض المزود الطلب. تمت إعادة المبلغ إلى المحفظة التي خُصم منها.', '❌ The provider rejected this order. The amount was returned to the wallet charged.'));
+      return true;
+    }
+    const settled = appStore.resolvePendingPurchase(reserved.id, {
+      status: 'completed', providerOrderId: orderResult.orderId, provider: orderResult.provider, providerStatus: orderResult.status,
+    });
+    if (!settled) throw new Error('Game top-up reservation could not be finalized');
+    try { appStore.addProfit(totalPrice); } catch (error) { logBotError('gameTopup.profit', error, { transactionId: reserved.id }); }
+    await safeTelegramCall('gameTopup.orderSuccess', () => bot.sendMessage(msg.chat.id,
       buildExecutionInvoiceText(lang, {
-        orderId: orderResult.orderId,
-        gameName: `${game.emoji} ${gameName(lang, game)}`,
-        playerId: payload.playerId,
-        packageLabel: payload.packageLabel,
-        totalPrice,
-        providerStatus,
-      }),
-      {
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: tr(lang, "ط±ط¬ظˆط¹", "Back"), callback_data: "service:game_topup" }],
-          ],
-        },
-      }
-    )
-  );
-
-  return true;
+        orderId: orderResult.orderId, gameName: `${game.emoji} ${gameName(lang, game)}`, playerId: payload.playerId,
+        packageLabel: payload.packageLabel, totalPrice, providerStatus: tr(lang, 'تم الإرسال إلى المزود', 'Submitted to provider'),
+      }), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: tr(lang, '🔙 رجوع', '🔙 Back'), callback_data: 'service:game_topup' }]] } }));
+    return true;
+  } catch (error) {
+    logBotError('gameTopup.processOrder', error, { userId: user.userId, transactionId: reserved?.id });
+    if (reserved) {
+      // A persistence error after contacting the provider must never refund or retry.
+      try { appStore.resolvePendingPurchase(reserved.id, { status: 'provider_unconfirmed' }); } catch (_) {}
+      await pendingNotice(reserved.id);
+    } else await reply(tr(lang, '❌ تعذر بدء الطلب الآن. لم يتم إرسال طلب إلى المزود.', '❌ Unable to start this order. No request was sent to the provider.'));
+    return true;
+  } finally { gameTopupOrdersInFlight.delete(user.userId); }
 }
 
 async function handleGameTopupTextInput(bot, msg, appStore) {
@@ -598,12 +568,10 @@ async function handleGameTopupCallback(bot, query, appStore) {
     }
 
     if (!state || state.name !== "GAME_TOPUP_READY_CONFIRM") {
-      await safeTelegramCall("gameTopup.confirm.missingState", () =>
-        bot.answerCallbackQuery(query.id, {
-          text: tr(lang, "انتهت الجلسة، ابدأ من جديد.", "Session expired, start again."),
-          show_alert: true,
-        })
-      );
+      await safeTelegramCall("gameTopup.confirm.missingState", () => bot.sendMessage(chatId,
+        gameTopupOrdersInFlight.has(user.userId)
+          ? tr(lang, "⏳ طلبك قيد التنفيذ. انتظر نتيجة الطلب قبل المحاولة مجدداً.", "⏳ Your order is processing. Wait for its result before retrying.")
+          : tr(lang, "انتهت الجلسة. راجع سجل عملياتك قبل إنشاء طلب جديد.", "Session expired. Check your order history before starting again.")));
       return true;
     }
 

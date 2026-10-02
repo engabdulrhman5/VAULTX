@@ -5,7 +5,7 @@ const { safeTelegramCall } = require("./telegramSafe");
 const { PUBLIC_BASE_URL, TELEGRAM_WEBAPP_URL } = require("../config");
 
 function resolveWebAppUrl(lang = "ar") {
-  const version = String(process.env.WEBAPP_VERSION || "2026-04-28-2");
+  const version = String(process.env.WEBAPP_VERSION || "2026-10-02-1");
   const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
   if (explicit) {
     const hasQuery = explicit.includes("?");

@@ -29,6 +29,7 @@ const { getUserLang, getArray, t } = require("../locales");
 const { escapeHtml, formatRuble } = require("../utils/formatters");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
+const socialBoostOrdersInFlight = new Set();
 
 function buildCard(frame, title, lines, footer) {
   return [
@@ -71,7 +72,7 @@ async function sendVirtualNumbersOffersMenu(bot, chatId, user, offerKey, options
   const entries = [];
 
   await Promise.all(providerKeys.map(async (providerKey) => {
-    const prices = await getServicePrices(serviceCode, providerKey);
+    const prices = await getServicePrices(serviceCode, providerKey, { cachedOnly: true, refreshInBackground: true });
     if (!prices || typeof prices !== "object") return;
 
     Object.keys(prices).forEach((countryId) => {
@@ -140,7 +141,7 @@ async function sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageI
   const lang = getUserLang(user);
 
   try {
-    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup });
+    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup, cachedOnly: true, refreshInBackground: true });
 
     if (!catalog.serviceCode) {
       const unsupportedText = lang === "ar"
@@ -171,7 +172,7 @@ async function sendVirtualNumberCountryDetails(bot, chatId, user, appName, count
   const lang = getUserLang(user);
 
   try {
-    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup });
+    const catalog = await getGrizzlyVirtualNumberCatalog(appName, { baseMarkup: options.baseMarkup, cachedOnly: true, refreshInBackground: true });
     const country = catalog.countries.find((item) => item.id === String(countryId));
 
     if (!country) {
@@ -502,6 +503,20 @@ function buildExecutionText(lang, payload) {
 }
 
 async function handleSocialBoostTextInput(bot, msg, appStore) {
+  const userId = Number(msg.from.id);
+  const state = getUserState(userId);
+  if (state?.name !== "SMM_AWAIT_QUANTITY") return handleSocialBoostTextInputUnlocked(bot, msg, appStore);
+  if (socialBoostOrdersInFlight.has(userId)) {
+    const lang = getUserLang(appStore.findUserById(userId));
+    await safeTelegramCall("handleSocialBoostTextInput.inFlight", () => bot.sendMessage(msg.chat.id, lang === "ar" ? "⏳ طلبك قيد التنفيذ الآن." : "⏳ Your order is processing."));
+    return true;
+  }
+  socialBoostOrdersInFlight.add(userId);
+  try { return await handleSocialBoostTextInputUnlocked(bot, msg, appStore); }
+  finally { socialBoostOrdersInFlight.delete(userId); }
+}
+
+async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
   try {
     const state = getUserState(msg.from.id);
     if (!state || !String(state.name || "").startsWith("SMM_AWAIT_")) {
@@ -590,7 +605,7 @@ async function handleSocialBoostTextInput(bot, msg, appStore) {
       const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
       const refill = getSocialBoostRefill(lang, cached);
 
-      if (currentBalance < total) {
+      if (!Number.isFinite(total) || total <= 0 || currentBalance < total) {
         await safeTelegramCall("handleSocialBoostTextInput.insufficient", () =>
           bot.sendMessage(
             msg.chat.id,
@@ -614,6 +629,14 @@ async function handleSocialBoostTextInput(bot, msg, appStore) {
         return true;
       }
 
+      const existingPending = (appStore.transactions || []).some((tx) => Number(tx.userId) === user.userId && ["pending", "provider_unconfirmed"].includes(tx.status) && tx.type === "social_boost_order" && String(tx.serviceId) === String(state.serviceId) && tx.link === state.link && Number(tx.quantity) === quantity);
+      if (existingPending) {
+        clearUserState(user.userId);
+        await safeTelegramCall("handleSocialBoostTextInput.pendingReview", () => bot.sendMessage(msg.chat.id, lang === "ar" ? "هذا الطلب قيد مراجعة المزود. تواصل مع الدعم قبل تكراره." : "This order needs provider review. Contact support before retrying."));
+        return true;
+      }
+      const reservation = appStore.reservePurchase(user.userId, total, { type: "social_boost_order", serviceKey: "social_boost", platformKey: state.platformKey, categoryKey: state.categoryKey, serviceId: String(state.serviceId), link: state.link, quantity });
+      if (!reservation) return true;
       const order = await createSmmOrder({
         serviceId: state.serviceId,
         link: state.link,
@@ -621,6 +644,15 @@ async function handleSocialBoostTextInput(bot, msg, appStore) {
       });
 
       if (!order.success) {
+        if (order.unconfirmed) {
+          appStore.resolvePendingPurchase(reservation.id, { status: "provider_unconfirmed" });
+          clearUserState(user.userId);
+          await safeTelegramCall("handleSocialBoostTextInput.unconfirmed", () => bot.sendMessage(msg.chat.id, lang === "ar"
+            ? "⏳ انقطع اتصال المزود قبل تأكيد الطلب. المبلغ محجوز مؤقتًا والطلب مسجل للمراجعة. تواصل مع الدعم قبل تكرار الطلب."
+            : "⏳ The provider connection ended before confirmation. Funds are reserved and the order is recorded for review. Contact support before retrying."));
+          return true;
+        }
+        appStore.resolvePendingPurchase(reservation.id, { status: "refunded", providerError: order.error || "provider_rejected" });
         await safeTelegramCall("handleSocialBoostTextInput.providerError", () =>
           bot.sendMessage(
             msg.chat.id,
@@ -644,19 +676,9 @@ async function handleSocialBoostTextInput(bot, msg, appStore) {
         return true;
       }
 
-      appStore.deductBalance(user.userId, total);
-      appStore.incrementTransactions(user.userId);
       appStore.addProfit(total);
-      appStore.addTransaction({
-        type: "social_boost_order",
-        userId: user.userId,
-        serviceKey: "social_boost",
-        platformKey: state.platformKey,
-        categoryKey: state.categoryKey,
-        serviceId: String(state.serviceId),
-        link: state.link,
-        quantity,
-        amount: total,
+      appStore.resolvePendingPurchase(reservation.id, {
+        status: "active",
         providerOrderId: String(order.orderId || ""),
       });
 
