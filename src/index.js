@@ -108,7 +108,7 @@ const appStore = new AppStore();
 const appContext = {
   botUsername: "VaultX",
 };
-const BOT_BUILD = "2026-10-02-3";
+const BOT_BUILD = "2026-10-02-4";
 let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
 

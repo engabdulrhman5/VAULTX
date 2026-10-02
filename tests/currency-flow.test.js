@@ -56,7 +56,7 @@ test('actual stacked callback routing completes language → currency → CAPTCH
   assert.equal(f.legacyCount(), 0);
 });
 
-test('only settings select currency while passive wallet taps preserve balances and pending flows', async () => {
+test('main-menu balances are text only and retired wallet taps preserve currency and pending flows', async () => {
   const f = fixture();
   await f.callback('menu:currency');
   assert.equal(lastText(f.requests).reply_markup.inline_keyboard.flat().filter(button => button.callback_data.startsWith('currency:set:')).length, 4);
@@ -68,19 +68,21 @@ test('only settings select currency while passive wallet taps preserve balances 
   const previousState = structuredClone(getUserState(101));
   await f.callback('wallet:select:YER');
   const menu = lastText(f.requests);
-  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).map(row => row.length), [2, 2]);
-  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).flat().map(button => button.text), ['$ 10.00', '₽ 30.00', 'ر.ي 530.00', 'ر.س 3.70']);
-  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).flat().map(button => button.callback_data),
-    ['wallet:display:USD', 'wallet:display:RUB', 'wallet:display:YER', 'wallet:display:SAR']);
+  assert.match(menu.text, /\$ 10\.00  ·  ₽ 30\.00\nر\.ي 530\.00  ·  ر\.س 3\.70/);
+  assert.equal(menu.reply_markup.inline_keyboard.flat().some(button => button.callback_data?.startsWith('wallet:')), false);
+  assert.equal(menu.reply_markup.inline_keyboard.flat().some(button => button.callback_data?.startsWith('currency:set:')), false);
+  assert.equal(menu.reply_markup.inline_keyboard[0][0].callback_data, 'service:virtual_numbers');
   assert.equal(menu.text.includes('الريال اليمني'), false);
   assert.equal(menu.text.includes('اختر محفظة'), false);
   assert.deepEqual(f.store.findUserById(101), previousUser);
   assert.deepEqual(getUserState(101), previousState);
   const beforePassiveTap = f.requests.length;
   await f.callback('wallet:display:USD');
-  assert.equal(f.requests.length, beforePassiveTap + 1);
-  assert.equal(f.requests.at(-1).method, 'answerCallbackQuery');
-  assert.equal(f.requests.at(-1).text, undefined);
+  assert.equal(f.requests.length, beforePassiveTap + 2);
+  assert.equal(f.requests[beforePassiveTap].method, 'answerCallbackQuery');
+  assert.equal(f.requests[beforePassiveTap].text, undefined);
+  assert.equal(lastText(f.requests).text, menu.text);
+  assert.equal(lastText(f.requests).reply_markup.inline_keyboard.flat().some(button => button.callback_data?.startsWith('wallet:')), false);
   assert.deepEqual(f.store.findUserById(101), previousUser);
   assert.deepEqual(getUserState(101), previousState);
   assert.equal(f.requests.filter(entry => entry.method === 'answerCallbackQuery').length, 4);
@@ -161,15 +163,16 @@ test('subscriber transfers keep sender and receiver currencies and execute only 
 });
 
 
-test('old main-menu callbacks rebuild current two-row wallets instead of keeping stale messages', async () => {
+test('old main-menu callbacks rebuild current text balances instead of keeping stale messages', async () => {
   const f = fixture();
   const { handleCallbackQuery } = require('../src/handlers/callbackHandler');
   await handleCallbackQuery(f.bot, { id: 'q', data: 'menu:main', from: { id: 101 },
     message: { chat: { id: 101 }, message_id: 9, text: 'القائمة الرئيسية\nالدولار الأمريكي: 0\nالروبل الروسي: 0' } }, f.store, {});
   const menu = lastText(f.requests);
   assert.equal(menu.method, 'editMessageText');
-  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).map(row => row.length), [2, 2]);
-  assert.equal(menu.reply_markup.inline_keyboard[0][0].text, '$ 10.00');
+  assert.match(menu.text, /\$ 10\.00  ·  ₽ 30\.00\nر\.ي 530\.00  ·  ر\.س 3\.70/);
+  assert.equal(menu.reply_markup.inline_keyboard.flat().some(button => button.callback_data?.startsWith('wallet:')), false);
+  assert.equal(menu.reply_markup.inline_keyboard[0][0].callback_data, 'service:virtual_numbers');
 });
 
 test('HTML prices, currency prefixes and tiny prices transform once while quantities and assets stay intact', async () => {
