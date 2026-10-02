@@ -108,12 +108,12 @@ const appStore = new AppStore();
 const appContext = {
   botUsername: "VaultX",
 };
-const BOT_BUILD = "2026-10-02-2";
+const BOT_BUILD = "2026-10-02-3";
 let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
 
 function resolveVaultXWebAppUrl() {
-  const version = String(process.env.WEBAPP_VERSION || "2026-10-02-1");
+  const version = String(process.env.WEBAPP_VERSION || BOT_BUILD);
   const explicit = String(TELEGRAM_WEBAPP_URL || "").trim();
   if (explicit) {
     const hasQuery = explicit.includes("?");

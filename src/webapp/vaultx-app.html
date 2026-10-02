@@ -144,7 +144,7 @@
           <div class="text-[11px] px-2 py-1 rounded-lg border border-vxline bg-white/5">ID: ${state.user.id||0}</div>
         </div>
         <div class="grid grid-cols-2 gap-2 mt-3">
-          ${['USD','RUB','YER','SAR'].map(code=>`<button data-wallet="${code}" aria-label="${code}" aria-pressed="${currency()===code}" class="glass rounded-xl p-3 aspect-square flex items-center justify-center text-base font-bold border ${currency()===code?'border-vxblue':'border-vxline'}"><span dir="ltr">${currency()===code?'✓ ':''}${SYMBOLS[code]} ${walletAmount(state.user.balances?.[code]||0)}</span></button>`).join('')}
+          ${['USD','RUB','YER','SAR'].map(code=>`<div data-balance="${code}" role="group" aria-label="${code}" class="glass rounded-xl p-3 aspect-square flex items-center justify-center text-base font-bold border border-vxline"><span dir="ltr">${SYMBOLS[code]} ${walletAmount(state.user.balances?.[code]||0)}</span></div>`).join('')}
         </div>
         <div class="mt-2 text-xs text-vxmuted">🏅 ${esc(state.user.level||"Newbie")}</div>
         <div class="grid grid-cols-4 gap-2 mt-3">
@@ -307,7 +307,6 @@
       const gs=document.querySelector('[data-action="go-settings"]'); if(gs) gs.onclick=()=>{ state.view='settings'; render(); };
       const ot=document.querySelector('[data-action="open-transfer"]'); if(ot) ot.onclick=()=>{ state.view='transfer'; render(); };
       const oc=document.querySelector('[data-action="open-convert"]'); if(oc) oc.onclick=()=>{ state.view='convert'; render(); };
-      document.querySelectorAll('[data-wallet]').forEach(b=>b.onclick=()=>selectWallet(b.dataset.wallet));
       const preferred=document.getElementById('preferredCurrency'); if(preferred) preferred.onchange=()=>selectWallet(preferred.value);
       const tr=document.querySelector('[data-action="submit-transfer"]'); if(tr) tr.onclick=()=>submitTransfer(currency());
       const cr=document.querySelector('[data-action="submit-convert"]'); if(cr) cr.onclick=()=>{const [from,to]=document.getElementById('cvPair').value.split(':');submitConvert(from,to);};
