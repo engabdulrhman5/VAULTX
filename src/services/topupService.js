@@ -1,4 +1,4 @@
-﻿const crypto = require("crypto");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -472,7 +472,7 @@ async function sendGatewayWebAppLauncher(bot, chatId, methodKey, options = {}) {
     lang,
     user_id: userId,
     screen: "payment",
-    v: String(process.env.WEBAPP_VERSION || "2026-04-28-2"),
+    v: String(process.env.WEBAPP_VERSION || "2026-10-02-1"),
   });
   if (!webAppUrl) {
     throw new Error("PUBLIC_BASE_URL is missing for WebApp launch");
@@ -555,7 +555,7 @@ async function sendStarsCheckout(bot, chatId, amountRub, lang = "ar") {
     t(lang, "topup_checkout_title"),
     "",
     `${t(lang, "topup_checkout_amount")}: ${formatRuble(amountRub)} RUB`,
-    `${t(lang, "topup_checkout_stars")}: ${formatRuble(starsAmount)}`,
+    `${t(lang, "topup_checkout_stars")}: ${Number(starsAmount).toLocaleString("en-US")}`,
     "",
     t(lang, "topup_checkout_hint"),
   ].join("\n");

@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { logBotError } = require("./errorLogger");
 const { grizzlyCountries } = require("../constants/grizzly");
-const { getServicePrices, calculateVirtualNumberPrice } = require("./grizzlyService");
+const { getServicePrices, getCachedPriceInfo, calculateVirtualNumberPrice } = require("./grizzlyService");
 
 const CACHE_FILE_PATH = path.resolve(__dirname, "../pricesCache.json");
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -19,8 +19,9 @@ function writeCacheFile(data) { try { fs.writeFileSync(CACHE_FILE_PATH, JSON.str
 async function fetchAndCachePrices() {
   try {
     const payload = await getServicePrices("wa", "server2", { forceRefresh: true });
-    if (!payload) return readCacheFile();
-    const result = { wa: [], fetchedAt: Date.now(), ttlMs: CACHE_TTL_MS, sourceCurrency: "USD", usdToRub: USD_TO_RUB };
+    const priceInfo = getCachedPriceInfo("wa", "server2");
+    if (!payload || !priceInfo) return readCacheFile();
+    const result = { wa: [], fetchedAt: priceInfo.at, ttlMs: CACHE_TTL_MS, sourceCurrency: "USD", usdToRub: USD_TO_RUB };
     Object.entries(payload || {}).forEach(([countryId, countryInfo]) => {
       const entry = countryInfo?.wa || countryInfo;
       const count = Number(entry?.count ?? entry?.qty ?? entry?.stock ?? 0);

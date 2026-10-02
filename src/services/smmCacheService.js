@@ -4,12 +4,19 @@ const path = require("path");
 const { selectedServiceIds, getServiceInfo } = require("../constants/smmServices");
 const { logBotError } = require("./errorLogger");
 const { getAxiosNetworkOptions } = require("../utils/network");
+const { saveData } = require("./jsonStorage");
 
 const CACHE_FILE = path.join(__dirname, "..", "..", "smm_cache.json");
 const { SMM_API_URL, SMM_API_KEY } = process.env;
 const smmProxyUrl = String(process.env.SMM_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").trim();
 const smmNetworkOptions = getAxiosNetworkOptions(smmProxyUrl);
 let servicesMemory = null;
+let servicesUpdatedAt = 0;
+let refreshRequest = null;
+let publicCatalogRequest = null;
+let lastRefreshAttempt = 0;
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const MAX_STALE_PRICE_MS = 24 * 60 * 60 * 1000;
 
 function parseApiUrls(raw) {
   return String(raw || "")
@@ -36,9 +43,10 @@ function loadCacheFile() {
     const raw = fs.readFileSync(CACHE_FILE, "utf8");
     const parsed = JSON.parse(raw);
     servicesMemory = Array.isArray(parsed.services) ? parsed.services : [];
+    servicesUpdatedAt = Number(parsed.at) || Date.parse(parsed.fetchedAt || parsed.lastUpdated || "") || 0;
     return servicesMemory;
   } catch (error) {
-    return [];
+    return (servicesMemory = []);
   }
 }
 
@@ -128,20 +136,39 @@ function buildEntry(apiService, previousEntry = null) {
     refillStatus: apiService.refill === true ? "available" : apiService.refill === false ? (meta.refillText || "unavailable") : (meta.refillText || previousEntry?.refillStatus || null),
     cancelStatus: apiService.cancel === true ? "available" : apiService.cancel === false ? "unavailable" : (previousEntry?.cancelStatus || null),
     providerName: apiService.name || previousEntry?.providerName || "",
+    priceUpdatedAt: Date.now(),
   };
 }
 
 function getCachedSmmServices() {
-  return loadCacheFile();
+  const services = loadCacheFile();
+  if (services.some((item) => Date.now() - Number(item.priceUpdatedAt ?? servicesUpdatedAt) >= CACHE_TTL_MS) || !services.length) scheduleSmmRefresh();
+  return services.filter((item) => {
+    const at = Number(item.priceUpdatedAt ?? servicesUpdatedAt);
+    return at > 0 && at <= Date.now() + 5 * 60 * 1000 && Date.now() - at <= MAX_STALE_PRICE_MS;
+  });
 }
 
 function getCachedSmmServiceById(serviceId) {
   const id = String(serviceId);
-  return loadCacheFile().find((item) => String(item.serviceId) === id) || null;
+  return getCachedSmmServices().find((item) => String(item.serviceId) === id) || null;
 }
 
 async function fetchAndCacheSmmServices() {
-  const previousServices = loadCacheFile();
+  if (refreshRequest) return refreshRequest;
+  lastRefreshAttempt = Date.now();
+  refreshRequest = refreshSmmServices();
+  try { return await refreshRequest; } finally { refreshRequest = null; }
+}
+
+function scheduleSmmRefresh() {
+  if (refreshRequest || Date.now() - lastRefreshAttempt < 60 * 1000 || !getSmmApiUrls().length || !SMM_API_KEY) return false;
+  void fetchAndCacheSmmServices().catch((error) => logBotError("scheduleSmmRefresh", error));
+  return true;
+}
+
+async function refreshSmmServices() {
+  const previousServices = loadCacheFile().map((item) => ({ ...item, priceUpdatedAt: Number(item.priceUpdatedAt ?? servicesUpdatedAt) }));
   const previousMap = new Map(previousServices.map((item) => [String(item.serviceId), item]));
 
   const apiUrls = getSmmApiUrls();
@@ -154,15 +181,20 @@ async function fetchAndCacheSmmServices() {
   for (const apiUrl of apiUrls) {
     try {
       const response = await axios.get(`${apiUrl}?key=${encodeURIComponent(SMM_API_KEY)}&action=services`, {
-        timeout: 20000,
+        timeout: 10000,
         ...smmNetworkOptions,
       });
       const apiServices = normalizeApiResponse(response.data);
       const filteredMap = new Map();
 
       for (const apiService of apiServices) {
+        if (!apiService || typeof apiService !== "object") continue;
         const serviceId = String(apiService.service || apiService.id || apiService.sid || "");
         if (!selectedServiceIds.includes(serviceId)) continue;
+        const rate = Number(apiService.rate);
+        const min = Number(apiService.min);
+        const max = Number(apiService.max);
+        if (!Number.isFinite(rate) || rate <= 0 || !Number.isSafeInteger(min) || min < 0 || !Number.isSafeInteger(max) || max < min) continue;
         filteredMap.set(serviceId, buildEntry(apiService, previousMap.get(serviceId)));
       }
 
@@ -170,10 +202,11 @@ async function fetchAndCacheSmmServices() {
         .map((serviceId) => filteredMap.get(serviceId) || previousMap.get(serviceId) || null)
         .filter(Boolean);
 
-      if (!mergedServices.length) return previousServices;
+      if (!filteredMap.size || !mergedServices.length) return previousServices;
 
-      fs.writeFileSync(CACHE_FILE, JSON.stringify({ fetchedAt: new Date().toISOString(), lastUpdated: new Date().toISOString(), services: mergedServices }, null, 2), "utf8");
+      saveData(CACHE_FILE, { fetchedAt: new Date().toISOString(), lastUpdated: new Date().toISOString(), services: mergedServices });
       servicesMemory = mergedServices;
+      servicesUpdatedAt = Date.now();
       return mergedServices;
     } catch (error) {
       logBotError("fetchAndCacheSmmServices", error, { apiUrl });
@@ -181,6 +214,42 @@ async function fetchAndCacheSmmServices() {
   }
 
   return previousServices;
+}
+
+async function refreshPublicSmmCatalog() {
+  if (publicCatalogRequest) return publicCatalogRequest;
+  const url = String(process.env.VAULTX_PUBLIC_SMM_CATALOG_URL || "https://raw.githubusercontent.com/engabdulrhman5/VAULTX/provider-catalog/catalog/smm-services.json");
+  publicCatalogRequest = (async () => {
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password) throw new Error("Public catalog must use an HTTPS URL without credentials");
+      const response = await axios.get(url, { timeout: 5000, maxContentLength: 2 * 1024 * 1024 });
+      const { sanitizeSmmServices } = require("./publicCatalog");
+      const incoming = sanitizeSmmServices(response.data);
+      const at = Number(response.data?.at);
+      if (!Number.isSafeInteger(at) || at <= 0 || at > Date.now() + 5 * 60 * 1000 || !incoming.length) return 0;
+      const previous = loadCacheFile();
+      const services = new Map(previous.map((item) => [String(item.serviceId), { ...item, priceUpdatedAt: Number(item.priceUpdatedAt ?? servicesUpdatedAt) }]));
+      let merged = 0;
+      for (const raw of incoming) {
+        const id = String(raw.service);
+        const existing = services.get(id);
+        if (Number(existing?.priceUpdatedAt ?? servicesUpdatedAt) >= at) continue;
+        const entry = buildEntry(raw, existing);
+        if (!entry) continue;
+        services.set(id, { ...entry, priceUpdatedAt: at });
+        merged += 1;
+      }
+      if (!merged) return 0;
+      servicesMemory = [...services.values()];
+      saveData(CACHE_FILE, { at: servicesUpdatedAt, services: servicesMemory });
+      return merged;
+    } catch (error) {
+      logBotError("refreshPublicSmmCatalog", error);
+      return 0;
+    }
+  })();
+  try { return await publicCatalogRequest; } finally { publicCatalogRequest = null; }
 }
 
 async function createSmmOrder({ serviceId, link, quantity }) {
@@ -214,8 +283,15 @@ async function createSmmOrder({ serviceId, link, quantity }) {
       if (data && data.error) {
         return { success: false, error: String(data.error), raw: data };
       }
+      return { success: false, error: "provider_unconfirmed", unconfirmed: true };
     } catch (error) {
       logBotError("createSmmOrder.post", error, { serviceId, quantity, apiUrl });
+      // Only an explicit method rejection permits the alternate GET form.
+      // A timeout or server error may already have created the order.
+      if (Number(error.response?.status) !== 405) {
+        if (!error.response || Number(error.response.status) >= 500) return { success: false, error: "provider_unconfirmed", unconfirmed: true };
+        return { success: false, error: "provider_rejected" };
+      }
     }
 
     try {
@@ -231,8 +307,11 @@ async function createSmmOrder({ serviceId, link, quantity }) {
       if (data && data.error) {
         return { success: false, error: String(data.error), raw: data };
       }
+      return { success: false, error: "provider_unconfirmed", unconfirmed: true };
     } catch (error) {
       logBotError("createSmmOrder.get", error, { serviceId, quantity, apiUrl });
+      if (!error.response || Number(error.response.status) >= 500) return { success: false, error: "provider_unconfirmed", unconfirmed: true };
+      return { success: false, error: "provider_rejected" };
     }
   }
 
@@ -244,4 +323,5 @@ module.exports = {
   getCachedSmmServices,
   getCachedSmmServiceById,
   createSmmOrder,
+  refreshPublicSmmCatalog,
 };

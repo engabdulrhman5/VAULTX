@@ -87,6 +87,19 @@
 
     const RATES = { USD: 1, YER: 530, SAR: 3.7, RUB: 30 };
     const CODES = Object.keys(RATES);
+    const SYMBOLS = { USD: '$', RUB: '₽', YER: 'ر.ي', SAR: 'ر.س' };
+    let walletSelectionBusy = false;
+    let transactionBusy = false;
+    function numericText(v){ return String(v??'').trim().replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-0x0660)).replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-0x06f0)).replace(/٫/g,'.').replace(/٬/g,''); }
+    function inputAmount(v){let n=numericText(v);n=/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(n)?n.replace(/,/g,''):n.replace(',','.');return /^\d+(?:\.\d+)?$/.test(n)?Number(n):NaN;}
+    function walletAmount(v){return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:6});}
+    async function selectWallet(code){
+      if(walletSelectionBusy||!CODES.includes(code)||code===currency())return;
+      walletSelectionBusy=true;
+      try{const r=await apiFetch('/webapp/currency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currency:code})});const d=await r.json();if(!d.ok)throw Error();state.user=d.profile;render();toast(isAr?'تم تغيير العملة':'Currency changed',true);}
+      catch(_){toast(isAr?'تعذر تغيير العملة':'Currency update failed',false);}
+      finally{walletSelectionBusy=false;}
+    }
     function uid(){ return Number(tg?.initDataUnsafe?.user?.id || 0); }
     function apiFetch(url, options={}) {
       if (!tg?.initData) return Promise.reject(new Error('Telegram session required'));
@@ -95,7 +108,7 @@
     function esc(v){ return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
     function rub(v){ const n=Number(v||0);const digits=Math.abs(n-Number(n.toFixed(2)))>1e-8?6:2;return n.toLocaleString(undefined,{maximumFractionDigits:digits}); }
     function currency(){ return CODES.includes(state.user.currency) ? state.user.currency : 'USD'; }
-    function moneyUsd(v){ const n=Number(v||0)*RATES[currency()]; const digits=Math.abs(n-Number(n.toFixed(2)))>1e-8?6:2; return `${n.toLocaleString('en-US',{maximumFractionDigits:digits})} ${currency()}`; }
+    function moneyUsd(v){ const n=Number(v||0)*RATES[currency()]; if(!Number.isFinite(n)||n<=0)return `0.00 ${currency()}`; const digits=n>=1?2:Math.max(2,1-Math.floor(Math.log10(n)));const scale=10**Math.min(digits,12);const rounded=Math.ceil(Number(n.toPrecision(14))*scale-1e-10)/scale;return `${rounded.toLocaleString('en-US',{minimumFractionDigits:Math.min(digits,12),maximumFractionDigits:Math.min(digits,12)})} ${currency()}`; }
     function moneyRub(v){ return moneyUsd(Number(v||0)/30); }
     function currencyOptions(selected){ return CODES.map(code=>`<option value="${code}" ${selected===code?'selected':''}>${code}</option>`).join(''); }
     function toast(text, ok){ const d=document.createElement("div"); d.className=`fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm ${ok?"bg-emerald-500/20 border-emerald-400/40":"bg-rose-500/20 border-rose-400/40"}`; d.textContent=text; document.body.appendChild(d); setTimeout(()=>d.remove(),1600); }
@@ -123,10 +136,9 @@
           <div class="text-[11px] px-2 py-1 rounded-lg border border-vxline bg-white/5">ID: ${state.user.id||0}</div>
         </div>
         <div class="grid grid-cols-2 gap-2 mt-3">
-          <div class="glass rounded-xl p-2"><div class="text-vxmuted text-[11px]">${isAr?'الرصيد المختار':'Selected balance'} (${currency()})</div><div class="font-bold text-sm">${rub(state.user.balances?.[currency()]||0)} ${currency()}</div></div>
-          <div class="glass rounded-xl p-2"><div class="text-vxmuted text-[11px]">${t.level}</div><div class="font-bold text-sm">${esc(state.user.level||"Newbie")}</div></div>
+          ${['USD','RUB','YER','SAR'].map(code=>`<button data-wallet="${code}" aria-label="${code}" aria-pressed="${currency()===code}" class="glass rounded-xl p-3 aspect-square flex items-center justify-center text-base font-bold border ${currency()===code?'border-vxblue':'border-vxline'}"><span dir="ltr">${currency()===code?'✓ ':''}${SYMBOLS[code]} ${walletAmount(state.user.balances?.[code]||0)}</span></button>`).join('')}
         </div>
-        <div class="glass rounded-xl p-2 mt-2 text-xs text-vxmuted">${CODES.map(c=>`${c}: ${rub(state.user.balances?.[c]||0)}`).join(' · ')}</div>
+        <div class="mt-2 text-xs text-vxmuted">🏅 ${esc(state.user.level||"Newbie")}</div>
         <div class="grid grid-cols-4 gap-2 mt-3">
           <button data-top="account" class="glass rounded-xl px-3 py-2 text-xs">👤 ${t.account}</button>
           <button data-top="referral" class="glass rounded-xl px-3 py-2 text-xs">🎁 ${t.referral}</button>
@@ -142,7 +154,7 @@
     }
 
     function operations(){
-      const rows = state.operations.length ? state.operations.map(tx=>`<div class="glass rounded-xl p-3 border border-vxline"><div class="flex justify-between"><div class="text-xs text-vxmuted">${esc(tx.type||tx.serviceKey||"tx")}</div><div class="text-xs">${CODES.includes(tx.currency)?moneyUsd(Number(tx.amount||0)/RATES[tx.currency]):moneyRub(tx.amount||0)}</div></div><div class="text-[11px] text-vxmuted mt-1">${esc(tx.createdAt||"")}</div></div>`).join('') : `<div class="glass rounded-xl p-4 text-sm text-vxmuted">${t.noOps}</div>`;
+      const rows = state.operations.length ? state.operations.map(tx=>`<div class="glass rounded-xl p-3 border border-vxline"><div class="flex justify-between"><div class="text-xs text-vxmuted">${esc(tx.type||tx.serviceKey||"tx")}</div><div class="text-xs">${walletAmount(tx.amount)} ${esc(CODES.includes(tx.currency)?tx.currency:'RUB')}${tx.type==='currency_conversion'?` → ${walletAmount(tx.convertedAmount)} ${esc(tx.targetCurrency||'')}`:''}</div></div><div class="text-[11px] text-vxmuted mt-1">${esc(tx.createdAt||"")}</div></div>`).join('') : `<div class="glass rounded-xl p-4 text-sm text-vxmuted">${t.noOps}</div>`;
       return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">${t.operations}</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div>${rows}</section>`;
     }
 
@@ -164,7 +176,10 @@
     }
 
     function convert(){
-      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">${t.convert}</div><button data-action="go-settings" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3 flex gap-2"><select id="cvFrom" class="bg-black/70 rounded-lg px-2 py-2">${currencyOptions(currency())}</select><span>→</span><select id="cvTo" class="bg-black/70 rounded-lg px-2 py-2">${currencyOptions(currency()==='USD'?'YER':'USD')}</select></div><div class="glass rounded-2xl p-3"><input id="cvAmount" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.amount}"><button data-action="submit-convert" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.submitConvert}</button></div></section>`;
+      const pairs=['USD:YER','YER:USD','USD:SAR','SAR:USD','USD:RUB','RUB:USD'];
+      const preferred=currency()==='USD'?'USD:YER':`${currency()}:USD`;
+      const options=pairs.map(pair=>`<option value="${pair}" ${pair===preferred?'selected':''}>${pair.replace(':',' → ')}</option>`).join('');
+      return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">${t.convert}</div><button data-action="go-settings" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><select id="cvPair" class="w-full bg-black/70 rounded-lg px-2 py-2">${options}</select></div><div class="glass rounded-2xl p-3"><input id="cvAmount" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.amount}"><button data-action="submit-convert" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.submitConvert}</button></div></section>`;
     }
 
     function virtualNumbers(){
@@ -242,19 +257,32 @@
     }
 
     async function submitTransfer(currency){
-      const target=Number(document.getElementById('trTarget')?.value||0); const amount=Number(document.getElementById('trAmount')?.value||0);
-      if(!target||!amount||amount<=0){ toast(isAr?'بيانات غير صحيحة':'Invalid data',false); return; }
-      const r=await apiFetch('/webapp/transfer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),target_id:target,amount,currency})});
-      const d=await r.json(); if(!d?.ok){ toast(isAr?'فشل التحويل':'Transfer failed',false); return; }
-      await refreshProfile(); await loadOps(); toast(isAr?'تم التحويل':'Transfer success',true);
+      if(transactionBusy)return;
+      const target=Number(numericText(document.getElementById('trTarget')?.value));
+      const amount=inputAmount(document.getElementById('trAmount')?.value);
+      if(!Number.isSafeInteger(target)||target<=0||!Number.isFinite(amount)||amount<=0||Number(amount.toFixed(6))<=0||Math.abs(amount-Number(amount.toFixed(6)))>1e-12){toast(isAr?'بيانات غير صحيحة · استخدم حتى ٦ منازل عشرية':'Invalid data · use up to six decimal places',false);return;}
+      transactionBusy=true;
+      const button=document.querySelector('[data-action="submit-transfer"]');if(button)button.disabled=true;
+      try{
+        const r=await apiFetch('/webapp/transfer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),target_id:target,amount,currency})});
+        const d=await r.json();if(!d?.ok){toast(isAr?'تعذر التحويل. تحقق من رصيدك وآيدي المستلم.':'Transfer failed. Check your wallet balance and receiver ID.',false);return;}
+        await Promise.all([refreshProfile(),loadOps()]);render();toast(isAr?'تم التحويل':'Transfer success',true);
+      }catch(_){toast(isAr?'تعذر الاتصال. تحقق من سجل العمليات قبل المحاولة مجدداً.':'Connection failed. Check your history before retrying.',false);}
+      finally{transactionBusy=false;if(button)button.disabled=false;}
     }
 
     async function submitConvert(from,to){
-      const amount=Number(document.getElementById('cvAmount')?.value||0);
-      if(!amount||amount<=0){ toast(isAr?'قيمة غير صحيحة':'Invalid amount',false); return; }
-      const r=await apiFetch('/webapp/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),from,to,amount})});
-      const d=await r.json(); if(!d?.ok){ toast(isAr?'فشل التحويل':'Conversion failed',false); return; }
-      await refreshProfile(); await loadOps(); toast(isAr?'تم التحويل':'Conversion success',true);
+      if(transactionBusy)return;
+      const amount=inputAmount(document.getElementById('cvAmount')?.value);
+      if(!Number.isFinite(amount)||amount<=0||Number(amount.toFixed(6))<=0||Math.abs(amount-Number(amount.toFixed(6)))>1e-12){toast(isAr?'قيمة غير صحيحة · استخدم حتى ٦ منازل عشرية':'Invalid amount · use up to six decimal places',false);return;}
+      transactionBusy=true;
+      const button=document.querySelector('[data-action="submit-convert"]');if(button)button.disabled=true;
+      try{
+        const r=await apiFetch('/webapp/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid(),from,to,amount})});
+        const d=await r.json();if(!d?.ok){toast(isAr?'تعذر التحويل. تحقق من رصيد العملة المختارة.':'Conversion failed. Check the source wallet balance.',false);return;}
+        await Promise.all([refreshProfile(),loadOps()]);render();toast(isAr?'تم التحويل':'Conversion success',true);
+      }catch(_){toast(isAr?'تعذر الاتصال. تحقق من سجل العمليات قبل المحاولة مجدداً.':'Connection failed. Check your history before retrying.',false);}
+      finally{transactionBusy=false;if(button)button.disabled=false;}
     }
 
     function bind(){
@@ -271,9 +299,10 @@
       const gs=document.querySelector('[data-action="go-settings"]'); if(gs) gs.onclick=()=>{ state.view='settings'; render(); };
       const ot=document.querySelector('[data-action="open-transfer"]'); if(ot) ot.onclick=()=>{ state.view='transfer'; render(); };
       const oc=document.querySelector('[data-action="open-convert"]'); if(oc) oc.onclick=()=>{ state.view='convert'; render(); };
-      const preferred=document.getElementById('preferredCurrency'); if(preferred) preferred.onchange=async()=>{try{const r=await apiFetch('/webapp/currency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currency:preferred.value})});const d=await r.json();if(!d.ok)throw Error();state.user=d.profile;render();toast(isAr?'تم تغيير العملة':'Currency changed',true);}catch(_){toast(isAr?'تعذر تغيير العملة':'Currency update failed',false);}};
+      document.querySelectorAll('[data-wallet]').forEach(b=>b.onclick=()=>selectWallet(b.dataset.wallet));
+      const preferred=document.getElementById('preferredCurrency'); if(preferred) preferred.onchange=()=>selectWallet(preferred.value);
       const tr=document.querySelector('[data-action="submit-transfer"]'); if(tr) tr.onclick=()=>submitTransfer(currency());
-      const cr=document.querySelector('[data-action="submit-convert"]'); if(cr) cr.onclick=()=>submitConvert(document.getElementById('cvFrom').value,document.getElementById('cvTo').value);
+      const cr=document.querySelector('[data-action="submit-convert"]'); if(cr) cr.onclick=()=>{const [from,to]=document.getElementById('cvPair').value.split(':');submitConvert(from,to);};
       document.querySelectorAll('[data-vn-app]').forEach(b=>b.onclick=async()=>{ state.vn.app=b.dataset.vnApp; await loadVnCountries(state.vn.app); render(); });
       document.querySelectorAll('[data-vn-country]').forEach(b=>b.onclick=()=>{ state.vn.selectedCountry=(state.vn.countries||[]).find(x=>String(x.id)===String(b.dataset.vnCountry))||null; render(); });
       document.querySelectorAll('[data-vn-buy]').forEach(b=>b.onclick=()=>buyVirtual(state.vn.app,b.dataset.vnBuy,b.dataset.vnProvider,Number(b.dataset.vnPrice||0)));

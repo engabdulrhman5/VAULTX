@@ -4,15 +4,20 @@ const {
   CONFIG_DB_PATH,
   TRANSACTIONS_DB_PATH,
   STORE_DB_PATH,
+  STATE_SNAPSHOT_PATH,
+  DATA_DIR,
 } = require("../config");
 const { loadData, saveData } = require("./jsonStorage");
-const { normalizeCurrency, currencyToRub, rubToCurrency, convert, CURRENCY_CODES } = require("./currencyService");
+const fs = require("fs");
+const path = require("path");
+const { normalizeCurrency, currencyToRub, rubToCurrency, convert, canConvert, CURRENCY_CODES } = require("./currencyService");
 
 class AppStore {
   constructor() {
     this.users = [];
     this.config = this.getDefaultConfig();
     this.transactions = [];
+    global.__VAULTX_APP_STORE = this;
     this.loadAll();
   }
 
@@ -42,20 +47,36 @@ class AppStore {
   }
 
   loadAll() {
-    const legacyStore = loadData(STORE_DB_PATH, null);
-    this.users = loadData(USERS_DB_PATH, legacyStore?.users || []).map((user) => this.normalizeUser(user));
+    const snapshot = loadData(STATE_SNAPSHOT_PATH, null, { strict: true });
+    if (snapshot && (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.users) || !Array.isArray(snapshot.transactions) || !snapshot.config || typeof snapshot.config !== "object")) {
+      throw new Error("Invalid wallet snapshot; refusing to overwrite customer balances");
+    }
+    const hasLegacyStore = fs.existsSync(STORE_DB_PATH);
+    const parts = [USERS_DB_PATH, CONFIG_DB_PATH, TRANSACTIONS_DB_PATH];
+    const presentParts = parts.filter((file) => fs.existsSync(file)).length;
+    if (process.env.VAULTX_DATA_DIR && !snapshot && !hasLegacyStore && presentParts !== parts.length &&
+        !(presentParts === 0 && process.env.VAULTX_BOOTSTRAP_FROM_BUNDLE === "1")) {
+      throw new Error(`Incomplete wallet data in ${DATA_DIR}. Restore all three latest JSON files or explicitly seed an empty disk after reconciling balances.`);
+    }
+    const strictLegacy = Boolean(process.env.VAULTX_DATA_DIR);
+    const legacyStore = snapshot ? null : loadData(STORE_DB_PATH, null, { strict: strictLegacy });
+    const bundledDir = process.env.VAULTX_BOOTSTRAP_FROM_BUNDLE === "1" ? path.resolve(__dirname, "../../data") : null;
+    const bundled = bundledDir ? Object.fromEntries(["users", "config", "transactions"].map((name) => [name, path.join(bundledDir, `${name}.json`)])) : {};
+    this.users = (snapshot?.users || loadData(USERS_DB_PATH, legacyStore?.users || (bundled.users ? loadData(bundled.users, []) : []), { strict: strictLegacy })).map((user) => this.normalizeUser(user));
     const defaults = this.getDefaultConfig();
-    const loaded = loadData(
+    const loaded = snapshot?.config || loadData(
       CONFIG_DB_PATH,
-      legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : defaults
+      legacyStore ? { services: legacyStore.services, botStats: legacyStore.botStats } : (bundled.config ? loadData(bundled.config, defaults) : defaults),
+      { strict: strictLegacy }
     ) || {};
+    const configSource = snapshot?.config || loaded;
 
     this.config = {
       ...defaults,
-      ...loaded,
-      services: { ...defaults.services, ...(loaded.services || {}) },
-      botStats: { ...defaults.botStats, ...(loaded.botStats || {}) },
-      temporaryEmailInventory: { ...(loaded.temporaryEmailInventory || {}) },
+      ...configSource,
+      services: { ...defaults.services, ...(configSource.services || {}) },
+      botStats: { ...defaults.botStats, ...(configSource.botStats || {}) },
+      temporaryEmailInventory: { ...(configSource.temporaryEmailInventory || {}) },
     };
     for (const service of Object.values(this.config.services)) {
       // Existing configured prices are RUB; keep the field for older admin
@@ -63,14 +84,75 @@ class AppStore {
       const legacyRub = Number(service.price || 0);
       service.priceUsd = Number((legacyRub / 30).toFixed(6));
     }
-    this.transactions = loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || []);
+    this.transactions = snapshot?.transactions || loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || (bundled.transactions ? loadData(bundled.transactions, []) : []), { strict: strictLegacy });
     this.persistAll();
   }
 
   persistAll() {
-    saveData(USERS_DB_PATH, this.users);
-    saveData(CONFIG_DB_PATH, this.config);
-    saveData(TRANSACTIONS_DB_PATH, this.transactions);
+    saveData(STATE_SNAPSHOT_PATH, { schemaVersion: 1, users: this.users, config: this.config, transactions: this.transactions });
+  }
+
+  persistWalletMutation(users, mutate) {
+    const originals = users.map((user) => ({ user, balances: { ...user.balances },
+      lastSeenAt: user.lastSeenAt, transactionsCount: user.transactionsCount, totalDeposits: user.totalDeposits }));
+    const originalTransactions = this.transactions.map((entry) => ({ ...entry }));
+    try {
+      const result = mutate();
+      this.persistAll();
+      return result;
+    } catch (error) {
+      for (const { user, ...original } of originals) Object.assign(user, original);
+      this.transactions = originalTransactions;
+      throw error;
+    }
+  }
+
+  transactionEntry(entry) {
+    return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), ...entry };
+  }
+
+  settleTopup(pendingId, entry, updates = {}) {
+    const pending = this.getTransactionById(pendingId);
+    const user = this.findUserById(pending?.userId);
+    const amount = Number(pending?.amount);
+    if (!pending || !user || !["topup_crypto_pending", "topup_cryptomus_pending"].includes(pending.type) ||
+        pending.status === "paid" || !Number.isFinite(amount) || amount <= 0) return null;
+    return this.persistWalletMutation([user], () => {
+      const currency = CURRENCY_CODES.includes(pending.walletCurrency) ? pending.walletCurrency : user.currency;
+      user.balances[currency] = Number((this.getBalance(user.userId, currency) + rubToCurrency(amount, currency)).toFixed(6));
+      user.totalDeposits = Number((user.totalDeposits + amount).toFixed(2));
+      user.transactionsCount += 1;
+      user.lastSeenAt = new Date().toISOString();
+      Object.assign(pending, updates, { status: "paid", paidAt: new Date().toISOString() });
+      this.transactions.push(this.transactionEntry({ ...entry, userId: user.userId, amount, currency: "RUB", walletCurrency: currency, status: "completed" }));
+      return user;
+    });
+  }
+
+  reservePurchase(userId, amountRub, entry) {
+    const user = this.findUserById(userId);
+    const amount = Number(amountRub);
+    const debit = user ? Number(rubToCurrency(amount, user.currency).toFixed(6)) : 0;
+    if (!user || !Number.isFinite(amount) || amount <= 0 || debit <= 0 || this.getBalance(userId) + 1e-8 < debit) return null;
+    return this.persistWalletMutation([user], () => {
+      user.balances[user.currency] = Number((this.getBalance(userId) - debit).toFixed(6));
+      const pending = this.transactionEntry({ ...entry, userId: user.userId, amount, currency: "RUB", walletCurrency: user.currency, reservedAmount: debit, status: "pending" });
+      this.transactions.push(pending);
+      return pending;
+    });
+  }
+
+  resolvePendingPurchase(id, fields) {
+    const pending = this.getTransactionById(id);
+    const user = this.findUserById(pending?.userId);
+    if (!pending || !user || !["pending", "provider_unconfirmed"].includes(pending.status)) return null;
+    return this.persistWalletMutation([user], () => {
+      if (fields.status === "refunded") {
+        user.balances[pending.walletCurrency] = Number((this.getBalance(user.userId, pending.walletCurrency) + pending.reservedAmount).toFixed(6));
+      } else if (["completed", "active"].includes(fields.status)) user.transactionsCount += 1;
+      Object.assign(pending, fields, { updatedAt: new Date().toISOString() });
+      return pending;
+    });
   }
 
   normalizeUser(user) {
@@ -198,10 +280,11 @@ class AppStore {
     if (!user) return null;
     const base = Number(amountRub || 0);
     if (!Number.isFinite(base) || base <= 0) return null;
-    user.balances[user.currency] = Number((user.balances[user.currency] + rubToCurrency(base, user.currency)).toFixed(6));
-    user.lastSeenAt = new Date().toISOString();
-    this.persistAll();
-    return user;
+    return this.persistWalletMutation([user], () => {
+      user.balances[user.currency] = Number((user.balances[user.currency] + rubToCurrency(base, user.currency)).toFixed(6));
+      user.lastSeenAt = new Date().toISOString();
+      return user;
+    });
   }
 
   addBalanceInCurrency(userId, amount, currency) {
@@ -212,10 +295,11 @@ class AppStore {
     const value = Number(amount);
     const next = Number(user.balances[code] || 0) + value;
     if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(next)) return null;
-    user.balances[code] = Number(Math.max(0, next).toFixed(6));
-    user.lastSeenAt = new Date().toISOString();
-    this.persistAll();
-    return user;
+    return this.persistWalletMutation([user], () => {
+      user.balances[code] = Number(Math.max(0, next).toFixed(6));
+      user.lastSeenAt = new Date().toISOString();
+      return user;
+    });
   }
 
   deductBalance(userId, amountRub) {
@@ -224,10 +308,11 @@ class AppStore {
     const base = Number(amountRub || 0);
     const current = currencyToRub(user.balances[user.currency] || 0, user.currency);
     if (!Number.isFinite(base) || base <= 0 || current + 1e-8 < base) return null;
-    user.balances[user.currency] = Number(Math.max(0, rubToCurrency(current - base, user.currency)).toFixed(6));
-    user.lastSeenAt = new Date().toISOString();
-    this.persistAll();
-    return user;
+    return this.persistWalletMutation([user], () => {
+      user.balances[user.currency] = Number(Math.max(0, rubToCurrency(current - base, user.currency)).toFixed(6));
+      user.lastSeenAt = new Date().toISOString();
+      return user;
+    });
   }
 
   addUsdBalance(userId, amount) { return this.addBalanceInCurrency(userId, amount, "USD"); }
@@ -246,12 +331,9 @@ class AppStore {
     const receiver = this.findUserById(receiverId);
     const value = Number(amount);
     if (!sender || !receiver || sender === receiver || !CURRENCY_CODES.includes(currency) ||
-        !Number.isFinite(value) || value <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-9 ||
+        !Number.isFinite(value) || value <= 0 || Number(value.toFixed(6)) <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-12 ||
         this.getBalance(senderId, currency) + 1e-8 < value) return false;
-    sender.balances[currency] = Number((this.getBalance(senderId, currency) - value).toFixed(6));
-    receiver.balances[currency] = Number((this.getBalance(receiverId, currency) + value).toFixed(6));
-    this.persistAll();
-    return true;
+    return this.commitTransfer(sender, receiver, value, value, currency, currency);
   }
 
   transferPreferred(senderId, receiverId, amountRub, from, to) {
@@ -261,25 +343,46 @@ class AppStore {
     if (!sender || !receiver || sender === receiver || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to) ||
         !Number.isFinite(base) || base <= 0) return false;
     const debit = rubToCurrency(base, from);
-    const credit = rubToCurrency(base, to);
-    if (this.getBalance(senderId, from) + 1e-8 < debit) return false;
-    sender.balances[from] = Number((this.getBalance(senderId, from) - debit).toFixed(6));
-    receiver.balances[to] = Number((this.getBalance(receiverId, to) + credit).toFixed(6));
-    this.persistAll();
-    return true;
+    const credit = Math.floor(rubToCurrency(base, to) * 1e6 + 1e-9) / 1e6;
+    if (Number(debit.toFixed(6)) <= 0 || Math.abs(debit - Number(debit.toFixed(6))) > 1e-12 || credit <= 0 || this.getBalance(senderId, from) + 1e-8 < debit) return false;
+    return this.commitTransfer(sender, receiver, Number(debit.toFixed(6)), credit, from, to);
+  }
+
+  commitTransfer(sender, receiver, debit, credit, from, to) {
+    return this.persistWalletMutation([sender, receiver], () => {
+      sender.balances[from] = Number((this.getBalance(sender.userId, from) - debit).toFixed(6));
+      receiver.balances[to] = Number((this.getBalance(receiver.userId, to) + credit).toFixed(6));
+      sender.transactionsCount += 1;
+      receiver.transactionsCount += 1;
+      this.transactions.push(
+        this.transactionEntry({ type: "transfer_out", userId: sender.userId, targetUserId: receiver.userId, amount: debit, currency: from, targetCurrency: to, convertedAmount: credit, status: "completed" }),
+        this.transactionEntry({ type: "transfer_in", userId: receiver.userId, sourceUserId: sender.userId, amount: credit, currency: to, sourceCurrency: from, sourceAmount: debit, status: "completed" })
+      );
+      return true;
+    });
   }
 
   convertBalance(userId, amount, from, to) {
     const user = this.findUserById(userId);
     const value = Number(amount);
-    if (!user || !CURRENCY_CODES.includes(from) || !CURRENCY_CODES.includes(to) || from === to ||
-        !Number.isFinite(value) || value <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-9 ||
+    if (!user || !canConvert(from, to) ||
+        !Number.isFinite(value) || value <= 0 || Number(value.toFixed(6)) <= 0 || Math.abs(value - Number(value.toFixed(6))) > 1e-12 ||
         this.getBalance(userId, from) + 1e-8 < value) return null;
-    const converted = Number(convert(value, from, to).toFixed(6));
+    const converted = Math.floor(convert(value, from, to) * 1e6 + 1e-9) / 1e6;
     if (!Number.isFinite(converted) || converted <= 0) return null;
-    user.balances[from] = Number((this.getBalance(userId, from) - value).toFixed(6));
-    user.balances[to] = Number((this.getBalance(userId, to) + converted).toFixed(6));
-    this.persistAll();
+    const originalFrom = this.getBalance(userId, from);
+    const originalTo = this.getBalance(userId, to);
+    user.balances[from] = Number((originalFrom - value).toFixed(6));
+    user.balances[to] = Number((originalTo + converted).toFixed(6));
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), type: "currency_conversion", userId: user.userId, amount: value, currency: from, targetCurrency: to, convertedAmount: converted, status: "completed" };
+    this.transactions.push(entry);
+    try { this.persistAll(); }
+    catch (error) {
+      user.balances[from] = originalFrom;
+      user.balances[to] = originalTo;
+      this.transactions.pop();
+      throw error;
+    }
     return converted;
   }
 

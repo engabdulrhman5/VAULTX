@@ -1,0 +1,23 @@
+# Example for a production Render Blueprint. Replacing render.yaml with this
+# configuration upgrades the service and provisions a billable persistent disk.
+# Reconcile and restore the latest wallet data before making this change live.
+services:
+  - type: web
+    name: vaultx-bot
+    runtime: node
+    plan: 0.5c-512mb
+    autoDeploy: true
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    disk:
+      name: vaultx-data
+      mountPath: /var/data/vaultx
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: VAULTX_REQUIRE_PERSISTENT_STORAGE
+        value: "1"
+      - key: VAULTX_DATA_DIR
+        value: /var/data/vaultx

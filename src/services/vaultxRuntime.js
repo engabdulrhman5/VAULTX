@@ -3,8 +3,8 @@
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const { AppStore } = require('./appStore');
-const { normalizeCurrency, getCurrencyKeyboard } = require('./currencyService');
-const { setUserState, getUserState } = require('./stateStore');
+const { normalizeCurrency, getCurrencyKeyboard, CURRENCY_CODES } = require('./currencyService');
+const { setUserState, getUserState, clearUserState } = require('./stateStore');
 const { getUserLang, t } = require('../locales');
 const { safeTelegramCall } = require('./telegramSafe');
 const { CRYPTOMUS_MERCHANT_ID, CRYPTOMUS_API_KEY, PUBLIC_BASE_URL, USD_TO_RUB_RATE } = require('../config');
@@ -101,6 +101,7 @@ function getCurrencyForChat(chatId) {
 }
 
 let cryptomusWebhookContext = null;
+function clearCryptomusWebhookContext() { cryptomusWebhookContext = null; }
 
 function patchAppStore() {
   const originalNormalizeUser = AppStore.prototype.normalizeUser;
@@ -268,6 +269,7 @@ function patchTopup() {
   const originalVerify = topup.verifyCryptomusWebhookSignature;
   if (typeof originalVerify === 'function' && !originalVerify.__vaultxPatched) {
     const patched = function patchedVerify(rawBody, signatureHeader) {
+      clearCryptomusWebhookContext();
       if (!CRYPTOMUS_API_KEY) return false;
       let candidate = String(rawBody || '');
       let supplied = String(signatureHeader || '').trim();
@@ -357,54 +359,65 @@ function patchTopupKeyboard() {
 async function showCurrencySelection(bot, query, user, mode = 'settings') {
   const lang = getUserLang(user || { language: 'ar' });
   if (mode === 'registration') setUserState(user.userId, 'AWAITING_CURRENCY', { language: lang });
-  await safeTelegramCall('currency.menu.answer', () => bot.answerCallbackQuery(query.id));
-  return safeTelegramCall('currency.menu.show', () => bot.editMessageText(
-    lang === 'ar'
-      ? `💱 اختر عملتك المفضلة\n\nالعملة الحالية: ${currencyFromUser(user)}\n\nيمكنك تغييرها لاحقاً من الإعدادات.`
-      : `💱 Choose your preferred currency\n\nCurrent currency: ${currencyFromUser(user)}\n\nYou can change it later from Settings.`,
-    { chat_id: query.message?.chat?.id || query.from.id, message_id: query.message?.message_id, parse_mode: 'HTML', reply_markup: getCurrencyKeyboard(lang, currencyFromUser(user)) }
-  ));
+  else clearUserState(user.userId);
+  const prompt = lang === 'ar'
+    ? `💱 اختر عملتك المفضلة\n\nالعملة الحالية: ${currencyFromUser(user)}\n\nيمكنك تغييرها لاحقاً من الإعدادات.`
+    : `💱 Choose your preferred currency\n\nCurrent currency: ${currencyFromUser(user)}\n\nYou can change it later from Settings.`;
+  const { sendOrEditMessage } = require('./profileService');
+  await sendOrEditMessage(bot, query.message?.chat?.id || query.from.id, prompt,
+    getCurrencyKeyboard(lang, currencyFromUser(user), mode === 'registration'), query.message?.message_id, 'currency.menu');
+  return true;
 }
 
 async function handleCurrencyCallback(bot, query) {
   const data = String(query?.data || '');
+  // Do not touch the store for unrelated navigation or provider callbacks.
+  if (!['menu:currency', 'menu:change_currency', 'setlang_ar', 'setlang_en'].includes(data)
+      && !data.startsWith('currency:set:') && !data.startsWith('wallet:select:')) return false;
   const store = global.__VAULTX_APP_STORE;
-  if (!store) return false;
+  if (!store || !query?.from?.id) return false;
   const user = store.getOrCreateUser(query.from);
+  const lang = getUserLang(user);
+  const { sendOrEditMessage, sendMainMenu } = require('./profileService');
+  const chatId = query.message?.chat?.id || query.from.id;
 
-  if (data === 'menu:change_currency') {
-    await showCurrencySelection(bot, query, user, 'settings');
-    return true;
+  if (data === 'menu:currency' || data === 'menu:change_currency') {
+    await safeTelegramCall('currency.menu.answer', () => bot.answerCallbackQuery(query.id));
+    return showCurrencySelection(bot, query, user, user.isVerified ? 'settings' : 'registration');
   }
 
-  if (data.startsWith('currency:set:')) {
-    const selected = normalizeCurrency(data.split(':')[2]);
-    const updated = store.updateUser(user.userId, { currency: selected });
-    const state = getUserState(user.userId);
-    const lang = getUserLang(updated || user);
-    await safeTelegramCall('currency.set.answer', () => bot.answerCallbackQuery(query.id, { text: lang === 'ar' ? `تم اختيار ${selected} ✅` : `${selected} selected ✅` }));
-
-    if (state?.name === 'AWAITING_CURRENCY' && !(updated || user).isVerified) {
-      const code = String(Math.floor(10000 + Math.random() * 90000));
-      setUserState(user.userId, 'AWAITING_CAPTCHA', { captchaCode: code });
-      await safeTelegramCall('currency.registration.captcha', () => bot.editMessageText(
-        [`<b>${t(lang, 'start_captcha_title')}</b>`, '', `${t(lang, 'start_captcha_prompt')} <code>${code}</code>`].join('\n'),
-        { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'HTML' }
-      ));
+  if (data.startsWith('currency:set:') || data.startsWith('wallet:select:')) {
+    const selected = data.split(':')[2];
+    if (!CURRENCY_CODES.includes(selected)) {
+      await safeTelegramCall('currency.invalid.answer', () => bot.answerCallbackQuery(query.id,
+        { text: lang === 'ar' ? 'عملة غير صالحة.' : 'Invalid currency.', show_alert: true }));
       return true;
     }
+    // Stop the spinner immediately, then persist and render the next screen.
+    await safeTelegramCall('currency.set.answer', () => bot.answerCallbackQuery(query.id,
+      { text: lang === 'ar' ? `تم اختيار ${selected} ✅` : `${selected} selected ✅` }));
+    const updated = store.setCurrency(user.userId, selected) || user;
+    if (!updated.isVerified) {
+      const code = String(Math.floor(10000 + Math.random() * 90000));
+      setUserState(user.userId, 'AWAITING_CAPTCHA', { captchaCode: code });
+      const challenge = [`<b>${t(lang, 'start_captcha_title')}</b>`, '', `${t(lang, 'start_captcha_prompt')} <code>${code}</code>`].join('\n');
+      await sendOrEditMessage(bot, chatId, challenge, undefined, query.message?.message_id, 'currency.registration.captcha');
+      return true;
+    }
+    clearUserState(user.userId);
+    if (data.startsWith('wallet:select:')) await sendMainMenu(bot, chatId, updated, { messageId: query.message?.message_id });
+    else await showCurrencySelection(bot, query, updated, 'settings');
     return true;
   }
 
-  if (data === 'setlang_ar' || data === 'setlang_en') {
-    const selectedLanguage = data === 'setlang_en' ? 'en' : 'ar';
-    const updated = store.updateUser(user.userId, { language: selectedLanguage });
-    await safeTelegramCall('currency.language.answer', () => bot.answerCallbackQuery(query.id, { text: selectedLanguage === 'ar' ? 'تم حفظ اللغة، اختر العملة الآن' : 'Language saved, choose your currency now' }));
-    if (!updated?.isVerified) return showCurrencySelection(bot, query, updated || user, 'registration');
-    return false;
-  }
-
-  return false;
+  const selectedLanguage = data === 'setlang_en' ? 'en' : 'ar';
+  await safeTelegramCall('currency.language.answer', () => bot.answerCallbackQuery(query.id,
+    { text: selectedLanguage === 'ar' ? 'تم حفظ اللغة ✅' : 'Language saved ✅' }));
+  const updated = store.updateUser(user.userId, { language: selectedLanguage }) || user;
+  if (!updated.isVerified) return showCurrencySelection(bot, query, updated, 'registration');
+  clearUserState(user.userId);
+  await sendMainMenu(bot, chatId, updated, { messageId: query.message?.message_id });
+  return true;
 }
 
 function patchCallbackRouting() {
@@ -419,7 +432,7 @@ function patchCallbackRouting() {
           query = { ...query, data: 'topup:auto:cryptomus' };
         }
       } catch (error) {
-        await safeTelegramCall('currency.callback.error', () => this.answerCallbackQuery(query.id, { text: 'Currency error', show_alert: true }));
+        await safeTelegramCall('currency.callback.error', () => this.sendMessage(query.message?.chat?.id || query.from.id, 'تعذر إكمال العملية. حاول مرة أخرى. / Unable to complete the action. Please retry.'));
         return true;
       }
       return handler.call(this, query);
@@ -437,4 +450,4 @@ patchTopup();
 // wrappers converted already converted values a second time.
 patchCallbackRouting();
 
-module.exports = { replaceMoney, formatDisplay, amountToRub, rubToCurrency };
+module.exports = { replaceMoney, formatDisplay, amountToRub, rubToCurrency, handleCurrencyCallback, clearCryptomusWebhookContext };
