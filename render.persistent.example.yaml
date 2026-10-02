@@ -9,7 +9,7 @@ services:
     autoDeploy: true
     buildCommand: npm ci
     startCommand: npm start
-    healthCheckPath: /
+    healthCheckPath: /health
     disk:
       name: vaultx-data
       mountPath: /var/data/vaultx

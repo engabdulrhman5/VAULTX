@@ -1,4 +1,4 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const { ADMIN_ID, USERS_EXPORT_PATH } = require("../config");
 const { clearUserState, getUserState, setUserState } = require("../services/stateStore");
@@ -20,8 +20,9 @@ const {
 } = require("../services/topupService");
 const { safeTelegramCall } = require("../services/telegramSafe");
 const { logBotError } = require("../services/errorLogger");
-const { formatRuble, escapeHtml, getDisplayName } = require("../utils/formatters");
+const { formatRuble, escapeHtml, getDisplayName, parseAmountInput } = require("../utils/formatters");
 const { notifyAdmin } = require("./startHandler");
+const { normalizeCurrency, currencyToRub, formatPriceNumber } = require("../services/currencyService");
 const { getUserLang } = require("../locales");
 const { handleVirtualNumbersTextInput } = require("../services/virtualNumbersFlowService");
 const { handleSocialBoostTextInput } = require("../services/serviceMenusService");
@@ -445,16 +446,27 @@ async function handleAdminState(bot, msg, appStore) {
     }
 
     if (state.name === "ADMIN_AWAITING_SERVICE_PRICE") {
-      const amount = Number(msg.text.trim());
+      const amount = parseAmountInput(msg.text);
+      // Old unfinished admin sessions used RUB input; newly opened sessions
+      // capture the shown currency so changing the wallet cannot change units.
+      const currency = normalizeCurrency(state.currency || "RUB");
       if (!Number.isFinite(amount) || amount < 0) {
-        await safeTelegramCall("handleAdminState.invalidServicePrice", () => bot.sendMessage(msg.chat.id, "ط§ظ„ط³ط¹ط± ط؛ظٹط± طµط§ظ„ط­."));
+        await safeTelegramCall("handleAdminState.invalidServicePrice", () => bot.sendMessage(msg.chat.id,
+          adminLang === "ar" ? `❌ أرسل سعراً صحيحاً بعملة ${currency}.` : `❌ Send a valid price in ${currency}.`));
         return true;
       }
 
-      appStore.updateServicePrice(state.serviceKey, amount);
+      const updated = appStore.updateServicePrice(state.serviceKey, currencyToRub(amount, currency));
+      if (!updated) {
+        await safeTelegramCall("handleAdminState.servicePriceMissing", () => bot.sendMessage(msg.chat.id,
+          adminLang === "ar" ? "❌ تعذر تحديث سعر هذه الخدمة." : "❌ Unable to update this service price."));
+        return true;
+      }
       clearUserState(msg.from.id);
-      await safeTelegramCall("handleAdminState.servicePriceDone", () => bot.sendMessage(msg.chat.id, "طھظ… طھط­ط¯ظٹط« ط§ظ„ط³ط¹ط± ط¨ظ†ط¬ط§ط­."));
-      await sendServicePricesMenu(bot, msg.chat.id, appStore.getServices());
+      await safeTelegramCall("handleAdminState.servicePriceDone", () => bot.sendMessage(msg.chat.id,
+        adminLang === "ar" ? `✅ تم تحديث السعر إلى ${formatPriceNumber(amount)} ${currency}.` : `✅ Price updated to ${formatPriceNumber(amount)} ${currency}.`,
+        { vaultx_preserve_currency: true }));
+      await sendServicePricesMenu(bot, msg.chat.id, appStore.getServices(), { lang: adminLang });
       return true;
     }
 

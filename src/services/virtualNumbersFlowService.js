@@ -7,7 +7,7 @@ const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { getGrizzlyCountryMeta, getGrizzlyServiceCode, grizzlyServices } = require("../constants/grizzly");
 const { getSmsProvider } = require("../constants/smsProviders");
 const { getServicePrices, extractPrice, requestNumber, getSmsStatus, cancelNumber, calculateVirtualNumberPrice, getCachedPriceInfo, getVirtualCacheSnapshot, getVirtualCacheVersion } = require("./grizzlyService");
-const { rubToCurrency } = require("./currencyService");
+const { rubToCurrency, formatCurrency } = require("./currencyService");
 
 const PAGE_SIZE = 28;
 const OFFER_LIMIT = 38;
@@ -39,8 +39,8 @@ const APP_TO_SERVICE = {
   tt: "tt",
   go: "go",
   sn: "sn",
-  wc: "go",
-  hj: "fb",
+  wc: "wc",
+  hj: "hj",
   im: "im",
   pp: "pp",
   vb: "vi",
@@ -134,7 +134,7 @@ function getText(lang) {
         created: "إنشاء",
         expires: "انتهاء",
         waiting: "⏳ لم يصل الكود بعد، حاول بعد ثوانٍ",
-        cancelled: "✅ تم إلغاء الطلب واسترجاع {price}₽",
+        cancelled: "✅ تم إلغاء الطلب واسترجاع {price}",
         buyFailed: "لا يوجد أرقام حاليًا",
         insufficient: "رصيدك غير كافٍ",
         noPrice: "لا يوجد سعر متاح حاليًا",
@@ -173,7 +173,7 @@ function getText(lang) {
         created: "Created",
         expires: "Expires",
         waiting: "⏳ Code has not arrived yet, try again in a few seconds",
-        cancelled: "✅ Order canceled and {price}₽ refunded",
+        cancelled: "✅ Order canceled and {price} refunded",
         buyFailed: "No numbers available now",
         insufficient: "Insufficient balance",
         noPrice: "No price available now",
@@ -209,7 +209,7 @@ function serviceCodeFromAppKey(appKey) {
   if (isServiceAppKey(appKey)) {
     return String(appKey).slice(4).toLowerCase();
   }
-  return "wa";
+  return null;
 }
 
 function normalizeAppKey(raw) {
@@ -226,7 +226,9 @@ function normalizeAppKey(raw) {
 
   const serviceCode = getGrizzlyServiceCode(value);
   const fromService = Object.entries(APP_TO_SERVICE).find(([, code]) => code === serviceCode);
-  return fromService?.[0] || "wa";
+  if (fromService) return fromService[0];
+  if (serviceCode) return toServiceAppKey(serviceCode);
+  return "unsupported";
 }
 
 function getAppLabel(lang, appKey) {
@@ -238,6 +240,7 @@ function getAppLabel(lang, appKey) {
     }
     return code.toUpperCase();
   }
+  if (appKey === "unsupported") return lang === "ar" ? "تطبيق غير مدعوم" : "Unsupported app";
   const app = getAppByKey(appKey);
   return lang === "ar" ? app.labelAr : app.labelEn;
 }
@@ -874,7 +877,7 @@ function buildCountriesKeyboard(lang, appKey, countryItems, page, totalPages) {
   };
 }
 
-function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback) {
+function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback, currency = "USD") {
   const tx = getText(lang);
   const lines = [
     [
@@ -887,7 +890,7 @@ function buildPriceKeyboard(lang, appKey, countryId, page, rows, backCallback) {
     const safePrice = formatPrice(row.price);
     const callback = `vnm:buy:${row.serverKey}:${appKey}:${countryId}:${safePrice}`;
     lines.push([
-      { text: `₽ ${safePrice}`, callback_data: callback },
+      { text: formatCurrency(row.price, currency), callback_data: callback },
       { text: `${row.stalePrice ? "⏱ " : ""}${index + 1}. ${row.label}`, callback_data: callback },
     ]);
   });
@@ -930,7 +933,7 @@ async function getCountryPriceRows(lang, appKey, countryId) {
   return rows.sort((a, b) => Number(a.price) - Number(b.price));
 }
 
-function buildSearchResultKeyboard(lang, appKey, countryId, rows) {
+function buildSearchResultKeyboard(lang, appKey, countryId, rows, currency = "USD") {
   const tx = getText(lang);
   const keyboard = [
     [
@@ -940,7 +943,7 @@ function buildSearchResultKeyboard(lang, appKey, countryId, rows) {
     ...rows.map((row, index) => {
       const callback = `vnm:buy:${row.serverKey}:${appKey}:${countryId}:${formatPrice(row.price)}`;
       return [
-        { text: `₽ ${formatPrice(row.price)}`, callback_data: callback },
+        { text: formatCurrency(row.price, currency), callback_data: callback },
         { text: `${index + 1}. ${row.label}`, callback_data: callback },
       ];
     }),
@@ -949,12 +952,12 @@ function buildSearchResultKeyboard(lang, appKey, countryId, rows) {
   return { inline_keyboard: keyboard };
 }
 
-function buildOfferKeyboard(lang, appKey, offers, page, totalPages) {
+function buildOfferKeyboard(lang, appKey, offers, page, totalPages, currency = "USD") {
   const rows = chunk(offers, 2).map((part) =>
     part.map((item) => {
       const country = getCountryLabel(lang, item.countryId);
       return {
-        text: `₽${item.sellPrice} : ${country.flag} ${country.name}`,
+        text: `${formatCurrency(item.sellPrice, currency)} : ${country.flag} ${country.name}`,
         callback_data: `vnm:ofbuy:${appKey}:${item.countryId}`,
       };
     })
@@ -978,7 +981,7 @@ function buildReceipt(lang, input) {
     `➖ ${t(lang, "virtualNumbers_receipt_code")} : ${tx.pendingCode}`,
     `➖ ${t(lang, "virtualNumbers_receipt_status")} : ${tx.status}`,
     `➖ ${t(lang, "virtualNumbers_receipt_app")} : ${input.appLabel}`,
-    `➖ ${t(lang, "virtualNumbers_receipt_price")} : ₽ ${formatPrice(input.price)}`,
+    `➖ ${t(lang, "virtualNumbers_receipt_price")} : ${formatCurrency(input.price, input.currency || "USD")}`,
     "",
     `➖ ${tx.created} : ${input.createdAt}`,
     `➖ ${tx.expires} : ${input.expiresAt}`,
@@ -1012,7 +1015,7 @@ async function sendActivationToChannel(bot, lang, payload) {
     `- ${t(lang, "virtualNumbers_receipt_number")}: <code>${payload.number}</code>`,
     `- ${t(lang, "virtualNumbers_receipt_app")}: ${appLabel}`,
     `- ${t(lang, "virtualNumbers_receipt_provider")}: ${getSmsProvider(payload.providerKey).name}`,
-    `- ${t(lang, "virtualNumbers_receipt_price")}: ₽ ${formatPrice(payload.price)}`,
+    `- ${t(lang, "virtualNumbers_receipt_price")}: ${formatCurrency(payload.price, "USD")}`,
     `- ${t(lang, "virtualNumbers_sms_received_code")}: <code>${payload.code || "-"}</code>`,
     `- ${t(lang, "virtualNumbers_sms_received_password")}: <code>${payload.password || "-"}</code>`,
   ].join("\n");
@@ -1189,6 +1192,7 @@ async function executeBuy(bot, query, appStore, serverKey, appKey, countryId, pr
     countryId,
     activationId,
     price: priceValue,
+    currency: walletCurrency,
   });
 
   const verifyLabel = tx.verify.replace("{app}", appLabel);
@@ -1199,6 +1203,7 @@ async function executeBuy(bot, query, appStore, serverKey, appKey, countryId, pr
     number,
     appLabel: `${appLabel}`,
     price: priceValue,
+    currency: walletCurrency,
     createdAt: dates.createdAt,
     expiresAt: dates.expiresAt,
   });
@@ -1208,6 +1213,7 @@ async function executeBuy(bot, query, appStore, serverKey, appKey, countryId, pr
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "HTML",
+      vaultx_preserve_currency: true,
       reply_markup: {
         inline_keyboard: [
           [{ text: tx.change, callback_data: `vnm:chg:${providerKey}:${activationId}:${formatPrice(priceValue)}:${appKey}:${countryId}` }],
@@ -1286,12 +1292,13 @@ async function handleCancel(bot, query, appStore, providerKey, activationId, pri
   const purchase = [...appStore.transactions].reverse().find((item) => item.type === "virtual_number_purchase" && String(item.activationId) === String(activationId));
   if (!purchase || Number(purchase.userId) !== user.userId || purchase.providerKey !== providerKey ||
       !["active", "pending"].includes(purchase.status)) return false;
+  const previousStatus = purchase.status;
   // Claim the refund before the provider call so concurrent callbacks cannot
   // each credit the same order.
   appStore.updateTransactionById(purchase.id, { status: "cancellation_pending" });
   const result = String(await cancelNumber(activationId, providerKey) || "");
   if (!/^ACCESS_CANCEL\b/i.test(result)) {
-    appStore.updateTransactionById(purchase.id, { status: purchase.status });
+    appStore.updateTransactionById(purchase.id, { status: previousStatus });
     await safeTelegramCall("virtualNumbersFlow.handleCancel.failed", () => bot.answerCallbackQuery(query.id, { text: lang === "ar" ? "تعذر الإلغاء من المزود" : "Provider did not confirm cancellation", show_alert: true }));
     return false;
   }
@@ -1301,11 +1308,12 @@ async function handleCancel(bot, query, appStore, providerKey, activationId, pri
   appStore.addBalanceInCurrency(user.userId, rubToCurrency(amount, walletCurrency), walletCurrency);
   appStore.addTransaction({ type: "virtual_number_refund", userId: user.userId, amount, currency: "RUB", walletCurrency, providerKey, activationId, status: "completed" });
 
-  const text = getText(lang).cancelled.replace("{price}", formatPrice(amount));
+  const text = getText(lang).cancelled.replace("{price}", formatCurrency(amount, walletCurrency));
   await safeTelegramCall("virtualNumbersFlow.handleCancel", () =>
     bot.editMessageText(text, {
       chat_id: query.message.chat.id,
       message_id: query.message.message_id,
+      vaultx_preserve_currency: true,
     })
   );
   return true;
@@ -1391,7 +1399,7 @@ async function handleVirtualNumbersTextInput(bot, msg, appStore) {
           const minPrice = row.rows[0]?.price || 0;
           return [
             { text: `${index + 1}. ${row.flag} ${row.name} ${row.dialCode}`.trim(), callback_data: callback },
-            { text: `₽ ${formatPrice(minPrice)}`, callback_data: callback },
+            { text: formatCurrency(minPrice, user.currency), callback_data: callback },
           ];
         }),
         [{ text: text.back, callback_data: `vnm:app:${appKey}` }],
@@ -1586,7 +1594,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         `📱 ${lang === "ar" ? "التطبيق" : "App"}: ${getAppLabel(lang, appKey)} | 🌍 ${lang === "ar" ? "الدولة" : "Country"}: ${country.flag} ${country.name}`,
         lang === "ar" ? "💡 الباقات المتوفرة حالياً لهذه الدولة في جميع خوادمنا." : "💡 Current tiers for this country across all servers.",
         lang === "ar" ? "💡 الباقات المرتفعة (VIP) تضمن لك وصول الكود أسرع." : "💡 Higher (VIP) tiers usually deliver code faster.",
-        lang === "ar" ? "💡 لا يتم خصم الرصيد إلا عند نجاح استلام كود الـ SMS." : "💡 Balance is charged only when purchase succeeds.",
+        lang === "ar" ? "💡 يُحجز المبلغ عند الطلب ويُسترجع عند تأكيد الإلغاء من المزود." : "💡 Funds are reserved at purchase and refunded when the provider confirms cancellation.",
         "━━━━━━━━━━━━━━━━━━━",
         lang === "ar" ? "⬇️ يرجى اختيار فئة الرقم المناسبة لك لبدء التفعيل ⬇️" : "⬇️ Choose the suitable number tier to start activation ⬇️",
       ].join("\n");
@@ -1594,7 +1602,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         bot,
         chatId,
         body,
-        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:best:${appKey}:${page}`),
+        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:best:${appKey}:${page}`, user.currency),
         messageId,
         "virtualNumbersFlow.bestCountryPrice"
       );
@@ -1624,7 +1632,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         bot,
         chatId,
         body,
-        buildSearchResultKeyboard(lang, appKey, countryId, rows),
+        buildSearchResultKeyboard(lang, appKey, countryId, rows, user.currency),
         messageId,
         "virtualNumbersFlow.searchPick"
       );
@@ -1693,7 +1701,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         bot,
         chatId,
         body,
-        buildOfferKeyboard(lang, appKey, pageItems, safePage, totalPages),
+        buildOfferKeyboard(lang, appKey, pageItems, safePage, totalPages, user.currency),
         messageId,
         "virtualNumbersFlow.offers"
       );
@@ -1747,7 +1755,7 @@ async function handleVirtualNumbersCallback(bot, query, appStore) {
         bot,
         chatId,
         body,
-        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:app:${appKey}:${page}`),
+        buildPriceKeyboard(lang, appKey, countryId, page, rows, `vnm:app:${appKey}:${page}`, user.currency),
         messageId,
         "virtualNumbersFlow.countryPrice"
       );

@@ -82,7 +82,7 @@ class AppStore {
       // Existing configured prices are RUB; keep the field for older admin
       // controls and persist the canonical USD value alongside it.
       const legacyRub = Number(service.price || 0);
-      service.priceUsd = Number((legacyRub / 30).toFixed(6));
+      service.priceUsd = Number((legacyRub / 30).toPrecision(12));
     }
     this.transactions = snapshot?.transactions || loadData(TRANSACTIONS_DB_PATH, legacyStore?.transactions || (bundled.transactions ? loadData(bundled.transactions, []) : []), { strict: strictLegacy });
     this.persistAll();
@@ -439,7 +439,7 @@ class AppStore {
     const amountRub = Number(price);
     if (!Number.isFinite(amountRub) || amountRub < 0) return null;
     this.config.services[serviceKey].price = amountRub;
-    this.config.services[serviceKey].priceUsd = Number((amountRub / 30).toFixed(6));
+    this.config.services[serviceKey].priceUsd = Number((amountRub / 30).toPrecision(12));
     this.persistAll();
     return this.config.services[serviceKey];
   }

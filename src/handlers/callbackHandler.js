@@ -1,7 +1,8 @@
-﻿const { ADMIN_ID } = require("../config");
+const { ADMIN_ID } = require("../config");
 const { SERVICE_KEYS } = require("../constants/menu");
 const { getArray, t, getUserLang } = require("../locales");
 const { escapeHtml } = require("../utils/formatters");
+const { normalizeCurrency } = require("../services/currencyService");
 const { sendPlaceholderReply } = require("../services/menuService");
 const {
   sendMainMenu,
@@ -386,9 +387,17 @@ async function handleAdminCallbacks(bot, query, appStore) {
 
         if (query.data.startsWith("admin:edit_price:")) {
           const serviceKey = query.data.split(":")[2];
-          setUserState(ADMIN_ID, "ADMIN_AWAITING_SERVICE_PRICE", { serviceKey });
+          const admin = appStore.findUserById(query.from.id);
+          const lang = getUserLang(admin);
+          const currency = normalizeCurrency(admin?.currency);
+          await safeTelegramCall("handleAdminCallbacks.editPriceAnswer", () => bot.answerCallbackQuery(query.id));
+          if (!services[serviceKey]) return true;
+          setUserState(ADMIN_ID, "ADMIN_AWAITING_SERVICE_PRICE", { serviceKey, currency });
           await safeTelegramCall("handleAdminCallbacks.editPricePrompt", () =>
-            bot.sendMessage(chatId, `أرسل السعر الجديد للخدمة: ${services[serviceKey]?.name || serviceKey}`)
+            bot.sendMessage(chatId, lang === "ar"
+              ? `أرسل السعر الجديد للخدمة: ${services[serviceKey].name || serviceKey}\nعملة السعر: ${currency}\nأرسل Cancel للإلغاء.`
+              : `Send the new price for: ${services[serviceKey].name || serviceKey}\nPrice currency: ${currency}\nSend Cancel to cancel.`,
+            { vaultx_preserve_currency: true })
           );
           return true;
         }
@@ -493,9 +502,6 @@ async function handleCallbackQuery(bot, query, appStore, appContext) {
     switch (query.data) {
       case "menu:main":
         clearUserState(user.userId);
-        if (String(query.message?.text || "").includes(t(getUserLang(user), "mainMenu_header"))) {
-          return true;
-        }
         await sendMainMenu(bot, chatId, user, { messageId });
         return true;
 

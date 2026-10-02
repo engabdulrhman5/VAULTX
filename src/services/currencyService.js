@@ -39,9 +39,9 @@ function formatPriceNumber(amount) {
   if (!Number.isFinite(value) || value < 0) return "0.00";
   if (value === 0) return "0.00";
   const decimals = value >= 1 ? 2 : Math.max(2, 1 - Math.floor(Math.log10(value)));
-  const scale = 10 ** Math.min(decimals, 12);
+  const scale = 10 ** Math.min(decimals, 20);
   const rounded = Math.ceil(Number(value.toPrecision(14)) * scale - 1e-10) / scale;
-  return rounded.toLocaleString("en-US", { minimumFractionDigits: Math.min(decimals, 12), maximumFractionDigits: Math.min(decimals, 12) });
+  return rounded.toLocaleString("en-US", { minimumFractionDigits: Math.min(decimals, 20), maximumFractionDigits: Math.min(decimals, 20) });
 }
 function formatCurrency(amountRub, currency = DEFAULT_CURRENCY, options = {}) {
   const code = normalizeCurrency(currency); const value = rubToCurrency(amountRub, code);
