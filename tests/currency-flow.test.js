@@ -56,20 +56,34 @@ test('actual stacked callback routing completes language → currency → CAPTCH
   assert.equal(f.legacyCount(), 0);
 });
 
-test('settings and wallet taps retain four independent amounts in exactly two rows', async () => {
+test('only settings select currency while passive wallet taps preserve balances and pending flows', async () => {
   const f = fixture();
   await f.callback('menu:currency');
   assert.equal(lastText(f.requests).reply_markup.inline_keyboard.flat().filter(button => button.callback_data.startsWith('currency:set:')).length, 4);
   await f.callback('currency:set:SAR');
   assert.equal(f.store.findUserById(101).currency, 'SAR');
   assert.match(lastText(f.requests).text, /SAR/);
+  setUserState(101, 'AWAITING_CURRENCY_CONVERSION', { fromCurrency: 'USD', toCurrency: 'YER' });
+  const previousUser = structuredClone(f.store.findUserById(101));
+  const previousState = structuredClone(getUserState(101));
   await f.callback('wallet:select:YER');
   const menu = lastText(f.requests);
   assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).map(row => row.length), [2, 2]);
-  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).flat().map(button => button.text), ['$ 10.00', '₽ 30.00', '✓ ر.ي 530.00', 'ر.س 3.70']);
+  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).flat().map(button => button.text), ['$ 10.00', '₽ 30.00', 'ر.ي 530.00', 'ر.س 3.70']);
+  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).flat().map(button => button.callback_data),
+    ['wallet:display:USD', 'wallet:display:RUB', 'wallet:display:YER', 'wallet:display:SAR']);
   assert.equal(menu.text.includes('الريال اليمني'), false);
-  assert.equal(f.store.findUserById(101).currency, 'YER');
-  assert.equal(f.requests.filter(entry => entry.method === 'answerCallbackQuery').length, 3);
+  assert.equal(menu.text.includes('اختر محفظة'), false);
+  assert.deepEqual(f.store.findUserById(101), previousUser);
+  assert.deepEqual(getUserState(101), previousState);
+  const beforePassiveTap = f.requests.length;
+  await f.callback('wallet:display:USD');
+  assert.equal(f.requests.length, beforePassiveTap + 1);
+  assert.equal(f.requests.at(-1).method, 'answerCallbackQuery');
+  assert.equal(f.requests.at(-1).text, undefined);
+  assert.deepEqual(f.store.findUserById(101), previousUser);
+  assert.deepEqual(getUserState(101), previousState);
+  assert.equal(f.requests.filter(entry => entry.method === 'answerCallbackQuery').length, 4);
   assert.equal(f.legacyCount(), 0);
   await sendAccountMenu(f.bot, 101, f.store.findUserById(101));
   assert.match(lastText(f.requests).text, /الروبل الروسي: <b>30<\/b>/);
@@ -155,7 +169,7 @@ test('old main-menu callbacks rebuild current two-row wallets instead of keeping
   const menu = lastText(f.requests);
   assert.equal(menu.method, 'editMessageText');
   assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).map(row => row.length), [2, 2]);
-  assert.equal(menu.reply_markup.inline_keyboard[0][0].text, '✓ $ 10.00');
+  assert.equal(menu.reply_markup.inline_keyboard[0][0].text, '$ 10.00');
 });
 
 test('HTML prices, currency prefixes and tiny prices transform once while quantities and assets stay intact', async () => {

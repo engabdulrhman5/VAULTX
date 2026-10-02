@@ -373,9 +373,24 @@ async function handleCurrencyCallback(bot, query) {
   const data = String(query?.data || '');
   // Do not touch the store for unrelated navigation or provider callbacks.
   if (!['menu:currency', 'menu:change_currency', 'setlang_ar', 'setlang_en'].includes(data)
-      && !data.startsWith('currency:set:') && !data.startsWith('wallet:select:')) return false;
+      && !data.startsWith('currency:set:') && !data.startsWith('wallet:display:')
+      && !data.startsWith('wallet:select:')) return false;
   const store = global.__VAULTX_APP_STORE;
   if (!store || !query?.from?.id) return false;
+  // Balance cells are passive. Retired selection buttons only refresh their
+  // stale menu, preserving both the preferred currency and any pending flow.
+  if (data.startsWith('wallet:display:') || data.startsWith('wallet:select:')) {
+    await safeTelegramCall('wallet.display.answer', () => bot.answerCallbackQuery(query.id));
+    if (data.startsWith('wallet:select:')) {
+      const existingUser = store.findUserById(query.from.id);
+      if (existingUser?.isVerified) {
+        const { sendMainMenu } = require('./profileService');
+        await sendMainMenu(bot, query.message?.chat?.id || query.from.id, existingUser,
+          { messageId: query.message?.message_id });
+      }
+    }
+    return true;
+  }
   const user = store.getOrCreateUser(query.from);
   const lang = getUserLang(user);
   const { sendOrEditMessage, sendMainMenu } = require('./profileService');
@@ -386,7 +401,7 @@ async function handleCurrencyCallback(bot, query) {
     return showCurrencySelection(bot, query, user, user.isVerified ? 'settings' : 'registration');
   }
 
-  if (data.startsWith('currency:set:') || data.startsWith('wallet:select:')) {
+  if (data.startsWith('currency:set:')) {
     const selected = data.split(':')[2];
     if (!CURRENCY_CODES.includes(selected)) {
       await safeTelegramCall('currency.invalid.answer', () => bot.answerCallbackQuery(query.id,
@@ -405,8 +420,7 @@ async function handleCurrencyCallback(bot, query) {
       return true;
     }
     clearUserState(user.userId);
-    if (data.startsWith('wallet:select:')) await sendMainMenu(bot, chatId, updated, { messageId: query.message?.message_id });
-    else await showCurrencySelection(bot, query, updated, 'settings');
+    await showCurrencySelection(bot, query, updated, 'settings');
     return true;
   }
 
