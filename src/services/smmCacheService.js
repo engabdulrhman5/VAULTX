@@ -5,6 +5,7 @@ const { selectedServiceIds, getServiceInfo } = require("../constants/smmServices
 const { logBotError } = require("./errorLogger");
 const { getAxiosNetworkOptions } = require("../utils/network");
 const { saveData } = require("./jsonStorage");
+const { formatPriceNumber } = require("./currencyService");
 
 const CACHE_FILE = path.join(__dirname, "..", "..", "smm_cache.json");
 const { SMM_API_URL, SMM_API_KEY } = process.env;
@@ -81,13 +82,13 @@ function parseServiceMeta(service) {
 function calculatePricePerUnitRub(rateValue) {
   const rate = Number(rateValue || 0);
   if (!Number.isFinite(rate) || rate <= 0) return null;
-  return Number((((rate / 1000) * 30) * 1.3).toFixed(4));
+  return Number((((rate / 1000) * 30) * 1.3).toPrecision(12));
 }
 
 function calculatePricePer1000Rub(rateValue) {
   const rate = Number(rateValue || 0);
   if (!Number.isFinite(rate) || rate <= 0) return null;
-  return Number(((rate * 30) * 1.3).toFixed(4));
+  return Number(((rate * 30) * 1.3).toPrecision(12));
 }
 
 function buildEntry(apiService, previousEntry = null) {
@@ -122,12 +123,12 @@ function buildEntry(apiService, previousEntry = null) {
     platformLabelAr: serviceInfo.platform.label_ar,
     platformLabelEn: serviceInfo.platform.label_en,
     rateUsdPer1000,
-    pricePerUnitUsd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3 / 1000).toFixed(8)) : (pricePerUnitRub === null ? null : pricePerUnitRub / 30),
-    pricePer1000Usd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3).toFixed(6)) : (pricePer1000Rub === null ? null : pricePer1000Rub / 30),
+    pricePerUnitUsd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3 / 1000).toPrecision(12)) : (pricePerUnitRub === null ? null : pricePerUnitRub / 30),
+    pricePer1000Usd: rateUsdPer1000 > 0 ? Number((rateUsdPer1000 * 1.3).toPrecision(12)) : (pricePer1000Rub === null ? null : pricePer1000Rub / 30),
     pricePerUnitRub,
-    pricePerUnitRubFormatted: pricePerUnitRub !== null ? pricePerUnitRub.toFixed(4) : previousEntry?.pricePerUnitRubFormatted || null,
+    pricePerUnitRubFormatted: pricePerUnitRub !== null ? formatPriceNumber(pricePerUnitRub) : previousEntry?.pricePerUnitRubFormatted || null,
     pricePer1000Rub,
-    pricePer1000RubFormatted: pricePer1000Rub !== null ? pricePer1000Rub.toFixed(4) : previousEntry?.pricePer1000RubFormatted || null,
+    pricePer1000RubFormatted: pricePer1000Rub !== null ? formatPriceNumber(pricePer1000Rub) : previousEntry?.pricePer1000RubFormatted || null,
     description,
     startTime: meta.startTime || previousEntry?.startTime || null,
     speed: meta.speed || previousEntry?.speed || null,

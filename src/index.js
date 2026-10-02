@@ -1,4 +1,8 @@
 require("dotenv").config();
+// Initialize currency routes for every entry point, including `node src/index.js`
+// and the legacy Python launcher. Deployment commands must not decide features.
+require("./services/vaultxRuntime");
+require("./services/vaultxCurrencyRuntime");
 const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
 const {
@@ -12,7 +16,7 @@ const {
 const { AppStore } = require("./services/appStore");
 const { verifyInitData } = require("./services/webAppAuth");
 const { verifyCryptoPayWebhook } = require("./services/cryptoPayAuth");
-const { CURRENCY_CODES, convert, canConvert } = require("./services/currencyService");
+const { CURRENCY_CODES, CONVERSION_PAIRS, convert, canConvert } = require("./services/currencyService");
 const { logBotError } = require("./services/errorLogger");
 const { safeTelegramCall } = require("./services/telegramSafe");
 const { isNetworkPermissionError } = require("./utils/network");
@@ -86,7 +90,7 @@ const botOptions = {
   polling: {
     autoStart: true,
     params: { timeout: 20 },
-    interval: 800,
+    interval: 200,
   },
   request: {
     forever: true,
@@ -104,6 +108,7 @@ const appStore = new AppStore();
 const appContext = {
   botUsername: "VaultX",
 };
+const BOT_BUILD = "2026-10-02-2";
 let pollingRestartTimer = null;
 let pollingRestartDelayMs = 5000;
 
@@ -335,7 +340,8 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
 
       if (req.method === "GET" && requestUrl.pathname === "/health") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(JSON.stringify({ ok: true, revision: process.env.RENDER_GIT_COMMIT || "local", storageMode: STORAGE_MODE, storagePathConfigured: Boolean(process.env.VAULTX_DATA_DIR) }));
+        res.end(JSON.stringify({ ok: true, build: BOT_BUILD, revision: process.env.RENDER_GIT_COMMIT || "local", storageMode: STORAGE_MODE, storagePathConfigured: Boolean(process.env.VAULTX_DATA_DIR),
+          features: { currencies: CURRENCY_CODES, conversionPairs: CONVERSION_PAIRS, priceBase: "USD", currencyRouter: Boolean(TelegramBot.prototype.on.__vaultxCurrencyRouterPatch) } }));
         return;
       }
 
@@ -747,7 +753,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
           return {
             id: String(s.id),
             name: lang === "ar" ? (cached?.nameAr || serviceInfo?.service?.name_ar || s.name_ar) : (cached?.nameEn || serviceInfo?.service?.name_en || s.name_en),
-            pricePerUnitRub: Number.isFinite(unit) ? Number(unit.toFixed(4)) : 0,
+            pricePerUnitRub: Number.isFinite(unit) ? Number(unit.toPrecision(12)) : 0,
             min: Number(cached?.min || 0),
             max: Number(cached?.max || 0),
           };
@@ -778,7 +784,7 @@ if (Number.isFinite(renderPort) && renderPort > 0) {
             res.end(JSON.stringify({ ok: false, error: "invalid_quantity", min, max }));
             return;
           }
-          const total = Number((Number(cached.pricePerUnitRub || 0) * quantity).toFixed(4));
+          const total = Number((Number(cached.pricePerUnitRub || 0) * quantity).toPrecision(12));
           if (!Number.isFinite(total) || total <= 0 || Number(user.balance || 0) < total) {
             res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "insufficient_balance", need: total, balance: Number(user.balance || 0) }));
@@ -1158,6 +1164,13 @@ for (const [name, refresh] of [["refresh.countries", fetchAndCachePrices], ["ref
   runBackgroundRefresh(name, refresh);
   setInterval(() => runBackgroundRefresh(name, refresh), 30 * 60 * 1000).unref();
 }
+
+bot.onText(/^\/version(?:@[A-Za-z0-9_]+)?\s*$/, async (msg) => {
+  const lang = getUserLang(appStore.findUserById(msg.from?.id) || { language: "ar" });
+  await safeTelegramCall("bot.version", () => bot.sendMessage(msg.chat.id,
+    `${lang === "ar" ? "إصدار البوت" : "Bot version"}: ${BOT_BUILD}\n${String(process.env.RENDER_GIT_COMMIT || "local").slice(0, 12)}`,
+    { vaultx_preserve_currency: true }));
+});
 
 bot.onText(/\/start(?:\s+(.+))?/, async (msg) => {
   try {

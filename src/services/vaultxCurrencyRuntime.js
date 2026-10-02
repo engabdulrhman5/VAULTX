@@ -10,23 +10,37 @@ function userForChat(chatId){const store=global.__VAULTX_APP_STORE;return store&
 function userCurrency(chatId){return normalizeCurrency(userForChat(chatId)?.currency||'USD');}
 function rubToDisplay(amountRub,currency){const code=normalizeCurrency(currency);const n=Number(amountRub);if(!Number.isFinite(n))return null;return `${currencyService.formatPriceNumber(n/RATES_RUB_PER_UNIT[code])} ${code}`;}
 function convert(amount,sourceCurrency,targetCurrency){const n=Number(String(amount).replace(',','.'));const source=normalizeCurrency(sourceCurrency);if(!Number.isFinite(n))return null;return rubToDisplay(n*RATES_RUB_PER_UNIT[source],targetCurrency);}
-function replaceMoney(text, targetCurrency, context = '') {
+function replaceMoney(text, targetCurrency) {
   const target = normalizeCurrency(targetCurrency);
   let result = String(text ?? '').replace(/â‚½/g, 'RUB').replace(/₽\s*RUB\b/gi, 'RUB');
   const number = '(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:[.,]\\d+)?)';
+  const unit = '(RUB(?![A-Za-z])|USD(?![A-Za-z])|YER(?![A-Za-z])|SAR(?![A-Za-z])|₽|\\$|روبل|دولار|ر\\.ي|ر\\.س|ريال\\s*يمني|ريال\\s*سعودي)';
+  const closingTags = '((?:\\s*</(?:b|strong|i|em|u|s|code)>)*\\s*)';
+  const openingTags = '(\\s*(?:<(?:b|strong|i|em|u|s|code)(?:\\s[^>]*)?>\\s*)*)';
   const parseAmount = value => Number(/^\d{1,3}(?:,\d{3})+/.test(value) ? value.replace(/,/g, '') : value.replace(',', '.'));
-  // Only monetary labels without a following currency are legacy RUB values.
-  // Never infer prices from arbitrary numbers: quantities, IDs and dates occur
-  // in the same messages and callback buttons.
-  const barePrice = new RegExp(`(سعر الوحدة|السعر|التكلفة|الإجمالي|الرصيد|المبلغ|Unit Price|Price|Cost|Total|Balance|Amount)(\\s*[:：=|\\-]?\\s*)(${number})(?![0-9.,]|\\s*(?:RUB|USD|YER|SAR|₽|\\$|روبل|دولار|ر\\.ي|ر\\.س))`, 'gi');
-  result = result.replace(barePrice,
-    (whole, label, separator, value) => `${label}${separator}${rubToDisplay(parseAmount(value), target)}`);
-  const suffix = new RegExp(`${number}\\s*(RUB|USD|YER|SAR|₽|\\$|روبل|دولار|ر\\.ي|ر\\.س)`, 'gi');
-  const currencyCode = unit => ({ '₽': 'RUB', 'روبل': 'RUB', '$': 'USD', 'دولار': 'USD', 'ر.ي': 'YER', 'ر.س': 'SAR' }[unit] || unit.toUpperCase());
-  result = result.replace(suffix, (whole, value, unit) => convert(parseAmount(value), currencyCode(unit), target) || whole);
-  result = result.replace(new RegExp(`([₽$])\\s*${number}`, 'g'),
-    (whole, unit, value) => convert(parseAmount(value), unit === '₽' ? 'RUB' : 'USD', target) || whole);
-  return result;
+  const currencyCode = value => {
+    const code = String(value).replace(/\s+/g, '').toUpperCase();
+    return ({ '₽': 'RUB', 'روبل': 'RUB', '$': 'USD', 'دولار': 'USD', 'ر.ي': 'YER', 'ر.س': 'SAR', 'رياليمني': 'YER', 'ريالسعودي': 'SAR' }[code] || code);
+  };
+  // Protect converted tokens before scanning other legacy formats. This keeps
+  // each amount on one conversion pass, even with mixed HTML and currencies.
+  const convertedTokens = [];
+  const protect = value => { const index = convertedTokens.push(value) - 1; return `\u0000VAULTXMONEY${index}\u0000`; };
+  const suffix = new RegExp(`(?<![A-Za-z0-9_.,])${number}${closingTags}${unit}`, 'gi');
+  result = result.replace(suffix, (whole, value, tags, source) => {
+    const converted = convert(parseAmount(value), currencyCode(source), target);
+    return converted ? protect(converted + (tags.includes('<') ? tags.trimEnd() : '')) : whole;
+  });
+  const prefix = new RegExp(`(?<![A-Za-z0-9_])${unit}${openingTags}${number}`, 'gi');
+  result = result.replace(prefix, (whole, source, tags, value) => {
+    const converted = convert(parseAmount(value), currencyCode(source), target);
+    return converted ? protect((tags.includes('<') ? tags.trimStart() : '') + converted) : whole;
+  });
+  // Only unlabelled financial fields are legacy RUB values. IDs, quantities,
+  // dates, and crypto assets such as USDT are deliberately left unchanged.
+  const barePrice = new RegExp(`(سعر الوحدة|السعر|التكلفة|الإجمالي|الرصيد|المبلغ|Unit Price|Price|Cost|Total|Balance|Amount)(\\s*[:：=|\\-]?${openingTags})${number}(?![0-9.,]|(?:\\s*</(?:b|strong|i|em|u|s|code)>)*\\s*(?:[A-Za-z]{3,5}|₽|\\$|روبل|دولار|ر\\.ي|ر\\.س|ريال))`, 'gi');
+  result = result.replace(barePrice, (whole, label, separator, tags, value) => `${label}${separator}${protect(rubToDisplay(parseAmount(value), target))}`);
+  return result.replace(/\u0000VAULTXMONEY(\d+)\u0000/g, (_, index) => convertedTokens[Number(index)]);
 }
 function transformMarkup(markup,currency){if(!markup||typeof markup!=='object')return markup;if(Array.isArray(markup))return markup.map(x=>transformMarkup(x,currency));const out={...markup};const callback=String(out.callback_data||'');if(typeof out.text==='string'&&!/^(?:currency:|wallet:)/.test(callback))out.text=replaceMoney(out.text,currency,callback);for(const key of ['inline_keyboard','keyboard'])if(Array.isArray(out[key]))out[key]=out[key].map(row=>transformMarkup(row,currency));return out;}
 function patchStore(){const original=AppStore.prototype.normalizeUser;if(original.__vaultxFinalCurrencyPatch)return;function patched(user){global.__VAULTX_APP_STORE=this;return original.call(this,user);}patched.__vaultxFinalCurrencyPatch=true;AppStore.prototype.normalizeUser=patched;}

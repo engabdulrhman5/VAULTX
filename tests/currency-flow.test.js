@@ -9,7 +9,7 @@ process.env.VAULTX_DATA_DIR = directory;
 process.env.RENDER = '';
 for (const [name, contents] of [['users', '[]'], ['config', '{}'], ['transactions', '[]']]) fs.writeFileSync(path.join(directory, `${name}.json`), contents);
 require('../src/services/vaultxRuntime');
-const { handleWalletCallback, handleWalletMessage, CONVERSION_PAIRS } = require('../src/services/vaultxCurrencyRuntime');
+const { handleWalletCallback, handleWalletMessage, CONVERSION_PAIRS, replaceMoney } = require('../src/services/vaultxCurrencyRuntime');
 const TelegramBot = require('node-telegram-bot-api');
 const { AppStore } = require('../src/services/appStore');
 const { getUserState, setUserState, clearUserState } = require('../src/services/stateStore');
@@ -144,4 +144,55 @@ test('subscriber transfers keep sender and receiver currencies and execute only 
   await f.callback('transfer:confirm');
   assert.equal(f.store.getBalance(101, 'USD'), 8.765433);
   assert.equal(f.store.transactions.filter(tx => tx.type === 'transfer_out').length, 1);
+});
+
+
+test('old main-menu callbacks rebuild current two-row wallets instead of keeping stale messages', async () => {
+  const f = fixture();
+  const { handleCallbackQuery } = require('../src/handlers/callbackHandler');
+  await handleCallbackQuery(f.bot, { id: 'q', data: 'menu:main', from: { id: 101 },
+    message: { chat: { id: 101 }, message_id: 9, text: 'القائمة الرئيسية\nالدولار الأمريكي: 0\nالروبل الروسي: 0' } }, f.store, {});
+  const menu = lastText(f.requests);
+  assert.equal(menu.method, 'editMessageText');
+  assert.deepEqual(menu.reply_markup.inline_keyboard.slice(0, 2).map(row => row.length), [2, 2]);
+  assert.equal(menu.reply_markup.inline_keyboard[0][0].text, '✓ $ 10.00');
+});
+
+test('HTML prices, currency prefixes and tiny prices transform once while quantities and assets stay intact', async () => {
+  const f = fixture();
+  const { getGameTopupPackagesKeyboard } = require('../src/keyboards/serviceMenusKeyboard');
+  await f.bot.sendMessage(101, 'السعر: <b>30</b> RUB | Quantity: 60 | ID: 123456', {
+    parse_mode: 'HTML', reply_markup: getGameTopupPackagesKeyboard({ key: 'game', packages: [
+      { units_ar: '60 UC', units_en: '60 UC', priceRub: 30 },
+      { units_ar: '600 UC', units_en: '600 UC', priceRub: 0.03 },
+    ] }, 'category', 0, 'ar'),
+  });
+  const message = lastText(f.requests);
+  assert.equal(message.text, 'السعر: <b>1.00 USD</b> | Quantity: 60 | ID: 123456');
+  assert.equal(message.reply_markup.inline_keyboard[1][0].text, '60 UC');
+  assert.equal(message.reply_markup.inline_keyboard[1][1].text, '1.00 USD');
+  assert.equal(message.reply_markup.inline_keyboard[1][1].callback_data, 'gt:p:game:0:category');
+  assert.equal(message.reply_markup.inline_keyboard[2][1].text, '0.0010 USD');
+  assert.equal(replaceMoney('RUB <b>30</b>', 'YER'), '<b>530.00 YER</b>');
+  assert.equal(replaceMoney('سعر الوحدة: <b>0.3</b>', 'USD'), 'سعر الوحدة: <b>0.010 USD</b>');
+  assert.equal(replaceMoney('Price: 1 USD | Cost: 30 RUB', 'SAR'), 'Price: 3.70 SAR | Cost: 3.70 SAR');
+  assert.equal(replaceMoney('Amount: 20 USDT | ID: X123USD | Quantity: 60', 'YER'), 'Amount: 20 USDT | ID: X123USD | Quantity: 60');
+});
+
+test('legacy currency preload uses canonical installers without duplicate settings or chat-global conversions', async () => {
+  const originalOn = TelegramBot.prototype.on;
+  const originalSendMessage = TelegramBot.prototype.sendMessage;
+  require('../src/services/currencyIntegration').install();
+  assert.equal(TelegramBot.prototype.on, originalOn);
+  assert.equal(TelegramBot.prototype.sendMessage, originalSendMessage);
+  const { getSettingsMenuKeyboard } = require('../src/keyboards/mainMenuKeyboard');
+  assert.equal(getSettingsMenuKeyboard('ar').inline_keyboard.flat().filter(button => button.callback_data.includes('currency')).length, 1);
+  const f = fixture();
+  await f.callback('menu:change_currency');
+  assert.equal(lastText(f.requests).reply_markup.inline_keyboard.flat().filter(button => button.callback_data.startsWith('currency:set:')).length, 4);
+  f.store.users.push(f.store.normalizeUser({ userId: 202, currency: 'SAR', language: 'ar', isVerified: true, balances: {} }));
+  await f.bot.sendMessage(202, 'Price: 30 RUB');
+  await f.bot.sendMessage(101, 'Price: 30 RUB');
+  assert.equal(f.requests.find(entry => entry.chat_id === 202).text, 'Price: 3.70 SAR');
+  assert.equal(lastText(f.requests).text, 'Price: 1.00 USD');
 });

@@ -1,8 +1,5 @@
 import os
-import subprocess
 import sys
-
-from keep_alive import keep_alive
 
 
 def _load_env_file(env_path=".env"):
@@ -29,24 +26,22 @@ def _load_env_file(env_path=".env"):
         key, value = line.split("=", 1)
         key = key.strip().lstrip("\ufeff")
         if key and key not in os.environ:
-            os.environ[key] = value.strip()
-
-
-_load_env_file()
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            os.environ[key] = value
 
 
 def main():
-    if not BOT_TOKEN:
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    _load_env_file()
+    if not os.environ.get("BOT_TOKEN"):
         print("BOT_TOKEN is missing in environment.", file=sys.stderr)
         sys.exit(1)
 
-    keep_alive()
-
-    command = ["node", "src/index.js"]
-    process = subprocess.Popen(command)
-    process.wait()
-    sys.exit(process.returncode)
+    # Node owns Telegram polling and the Render PORT. A second Flask server on
+    # that port hides the Mini App and crashes Node with EADDRINUSE.
+    os.execvp("node", ["node", "src/index.js"])
 
 
 if __name__ == "__main__":

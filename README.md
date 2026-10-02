@@ -9,7 +9,10 @@ npm test
 npm start
 ```
 
-Set `BOT_TOKEN` in `.env` before starting. `render.yaml` can deploy the same start command; the `/` endpoint returns `I am alive`.
+Set `BOT_TOKEN` in `.env` before starting. `render.yaml` deploys the same start command and checks `/health`. Currency initialization is inside `src/index.js`, so `npm start`, `node src/index.js`, and the legacy `python main.py` launcher all load the same currency routes. The Python launcher replaces its process with Node and does not start Flask on the bot's port.
+
+For an existing Render service, deploy the latest `main` commit. `/health` reports `features.currencyRouter: true`, four supported currencies, the six conversion pairs, and the actual running `revision`. A successful old `/` response alone does not confirm the updated bot is running.
+Send `/version` in Telegram to see the bot build and running Git revision. This helps distinguish a stale deployed instance from the updated code without access to the Render dashboard.
 
 ## Production wallet storage and deployment
 

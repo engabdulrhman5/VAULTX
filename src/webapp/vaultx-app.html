@@ -108,7 +108,15 @@
     function esc(v){ return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
     function rub(v){ const n=Number(v||0);const digits=Math.abs(n-Number(n.toFixed(2)))>1e-8?6:2;return n.toLocaleString(undefined,{maximumFractionDigits:digits}); }
     function currency(){ return CODES.includes(state.user.currency) ? state.user.currency : 'USD'; }
-    function moneyUsd(v){ const n=Number(v||0)*RATES[currency()]; if(!Number.isFinite(n)||n<=0)return `0.00 ${currency()}`; const digits=n>=1?2:Math.max(2,1-Math.floor(Math.log10(n)));const scale=10**Math.min(digits,12);const rounded=Math.ceil(Number(n.toPrecision(14))*scale-1e-10)/scale;return `${rounded.toLocaleString('en-US',{minimumFractionDigits:Math.min(digits,12),maximumFractionDigits:Math.min(digits,12)})} ${currency()}`; }
+    function formatPriceNumber(value){
+      const n=Number(value);if(!Number.isFinite(n)||n<=0)return '0.00';
+      // Unit rates can be far below wallet precision; retain leading zeros and
+      // two significant decimal digits before multiplying by a quantity.
+      const digits=Math.min(n>=1?2:Math.max(2,1-Math.floor(Math.log10(n))),20);
+      const scale=10**digits;const rounded=Math.ceil(Number(n.toPrecision(14))*scale-1e-10)/scale;
+      return rounded.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits});
+    }
+    function moneyUsd(v){return `${formatPriceNumber(Number(v||0)*RATES[currency()])} ${currency()}`; }
     function moneyRub(v){ return moneyUsd(Number(v||0)/30); }
     function currencyOptions(selected){ return CODES.map(code=>`<option value="${code}" ${selected===code?'selected':''}>${code}</option>`).join(''); }
     function toast(text, ok){ const d=document.createElement("div"); d.className=`fixed left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 rounded-xl border z-50 text-sm ${ok?"bg-emerald-500/20 border-emerald-400/40":"bg-rose-500/20 border-rose-400/40"}`; d.textContent=text; document.body.appendChild(d); setTimeout(()=>d.remove(),1600); }
@@ -194,7 +202,7 @@
     function socialBoost(){
       const pBtns=(state.smm.platforms||[]).map(p=>`<button data-smm-platform="${esc(p.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.smm.platform===p.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(p.icon||'🚀')} ${esc(p.name)}</button>`).join('');
       const cBtns=(state.smm.categories||[]).map(c=>`<button data-smm-category="${esc(c.key)}" class="px-3 py-2 rounded-xl border text-xs ${state.smm.category===c.key?'bg-vxblue text-black border-vxblue':'bg-white/5 border-vxline'}">${esc(c.name)}</button>`).join('');
-      const sBtns=(state.smm.services||[]).map(s=>`<button data-smm-service="${esc(s.id)}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(s.name)}</div><div class="text-[11px] text-vxmuted">${moneyRub(s.pricePerUnitRub)} • Min ${s.min} • Max ${s.max}</div></button>`).join('');
+      const sBtns=(state.smm.services||[]).map(s=>`<button data-smm-service="${esc(s.id)}" class="glass rounded-xl p-2 text-start border border-vxline"><div class="text-sm font-bold">${esc(s.name)}</div><div class="text-[11px] text-vxmuted">${moneyRub(s.pricePerUnitRub)} / ${isAr?'وحدة':'unit'} • Min ${s.min} • Max ${s.max}</div></button>`).join('');
       const service=state.smm.service;
       return `<section class="mt-3 space-y-2"><div class="glass rounded-2xl p-3 flex justify-between"><div class="font-bold">🚀 ${t.social_boost}</div><button data-action="go-dashboard" class="text-xs px-2 py-1 rounded-lg border border-vxline bg-white/5">${t.back}</button></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialPlatform}</div><div class="flex flex-wrap gap-2">${pBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialCategory}</div><div class="flex flex-wrap gap-2">${cBtns}</div></div><div class="glass rounded-2xl p-3"><div class="text-xs text-vxmuted mb-2">${t.socialService}</div><div class="grid gap-2">${sBtns||`<div class="text-xs text-vxmuted">-</div>`}</div></div>${service?`<div class="glass rounded-2xl p-3"><input id="smmLink" class="w-full rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.accountLink}"><input id="smmQty" class="w-full mt-2 rounded-xl bg-black/30 border border-vxline px-3 py-2 text-sm" placeholder="${t.quantity}"><button data-action="smm-order" class="w-full mt-2 rounded-xl bg-gradient-to-r from-vxblue to-sky-400 text-black font-extrabold py-2.5">${t.placeOrder}</button></div>`:''}</section>`;
     }

@@ -28,7 +28,7 @@ function smsHarness(initial = {}, get = async () => ({ status: 200, data: {} }))
   const logs = [];
   const constants = {
     grizzlyServices: { whatsapp: "wa", telegram: "tg" },
-    getGrizzlyServiceCode: (app) => /telegram|tg/i.test(app) ? "tg" : "wa",
+    getGrizzlyServiceCode: (app) => /^(telegram|tg)$/i.test(app) ? "tg" : /^(whatsapp|wa)$/i.test(app) ? "wa" : null,
     getGrizzlyCountryMeta: (id) => ({ id: String(id), name_ar: "الولايات المتحدة", name_en: "United States", flag: "🇺🇸" }),
   };
   const dependencies = {
@@ -202,4 +202,107 @@ test("concurrent number taps reserve once and an uncertain order stays recorded"
   assert.equal(store.getBalance(101, "USD"), 9);
   assert.equal(await flow.handleVirtualNumbersCallback(bot, { ...query, id: "retry" }, store), true);
   assert.equal(purchases, 1);
+});
+
+test("number price buttons render each selected currency without a Telegram patch", async () => {
+  const at = Date.now();
+  const snapshot = (providerKey) => ({ at, data: { countries: [{ id: "US", code: "US", providerCountryId: "187", providerKey, name_ar: "الولايات المتحدة", name_en: "United States", flag: "🇺🇸" }] } });
+  const harness = smsHarness({
+    ...prices(at),
+    "prices:server2:wa": { at, data: { 187: { wa: { cost: 2, count: 5 } } } },
+    "virtual-number-snapshot:v4:server1:wa": snapshot("server1"),
+    "virtual-number-snapshot:v4:server2:wa": snapshot("server2"),
+  });
+  const flow = evaluateService("virtualNumbersFlowService.js", {
+    ...harness.dependencies, "./grizzlyService": harness.service,
+    "./stateStore": { getUserState: () => null, setUserState() {}, clearUserState() {} },
+  }, {}, harness.clock);
+  let markup;
+  const bot = { answerCallbackQuery: async () => ({}), editMessageText: async (body, options) => { markup = options.reply_markup; return {}; } };
+  const query = { id: "quote", data: "vnm:country:wa:US:0", from: { id: 101 }, message: { chat: { id: 101 }, message_id: 5 } };
+  for (const [currency, expected] of [["USD", "1.00 $"], ["RUB", "30.00 ₽"], ["YER", "530.00 ر.ي"], ["SAR", "3.70 ر.س"]]) {
+    const store = { getOrCreateUser: () => ({ userId: 101, language: "ar", currency }) };
+    assert.equal(await flow.handleVirtualNumbersCallback(bot, query, store), true);
+    const buttons = markup.inline_keyboard.flat();
+    assert.equal(buttons.find((button) => button.callback_data === "vnm:buy:server1:wa:US:30").text, expected);
+    assert.equal(buttons.filter((button) => button.callback_data.startsWith("vnm:buy:")).length, 4);
+  }
+});
+
+test("unknown apps never silently use WhatsApp and unrelated aliases do not use Google or Facebook", async () => {
+  const at = Date.now();
+  const harness = smsHarness({
+    ...prices(at),
+    "prices:server1:go": { at, data: { 187: { go: { cost: 1, count: 5 } } } },
+    "prices:server1:fb": { at, data: { 187: { fb: { cost: 1, count: 5 } } } },
+  });
+  const flow = evaluateService("virtualNumbersFlowService.js", { ...harness.dependencies, "./grizzlyService": harness.service }, {}, harness.clock);
+  assert.equal((await flow.getProviderCatalog("unsupported", "server1")).length, 0);
+  assert.equal((await flow.getProviderCatalog("wc", "server1")).length, 0);
+  assert.equal((await flow.getProviderCatalog("hj", "server1")).length, 0);
+});
+
+test("SMM sub-unit quotes remain nonzero and menu text uses the selected currency", async () => {
+  const { selectedServiceIds, getServiceInfo } = require("../src/constants/smmServices");
+  const id = selectedServiceIds[0];
+  const cache = evaluateService("smmCacheService.js", {
+    axios: { get: async () => ({ data: [{ service: Number(id), name: "Tiny price", rate: "0.001", min: 10, max: 1000 }] }) },
+    fs: { readFileSync: () => JSON.stringify({ services: [] }) },
+    "./errorLogger": { logBotError() {} }, "./jsonStorage": { saveData() {} }, "../utils/network": { getAxiosNetworkOptions: () => ({}) },
+  }, { SMM_API_URL: "https://provider.invalid/api", SMM_API_KEY: "test-only-key" });
+  await cache.fetchAndCacheSmmServices();
+  assert.equal(cache.getCachedSmmServiceById(id).pricePerUnitRub, 0.000039);
+  let rendered;
+  const menus = evaluateService("serviceMenusService.js", {
+    "./smmCacheService": cache,
+    "./profileService": { sendOrEditMessage: async (bot, chatId, text, keyboard) => { rendered = { text, keyboard }; } },
+    "./stateStore": { getUserState: () => null, setUserState() {}, clearUserState() {} },
+  });
+  const info = getServiceInfo(id);
+  await menus.sendSocialBoostServiceDetails({}, 101, { userId: 101, language: "ar", currency: "USD" }, info.platform.key, info.category.key, id);
+  assert.match(rendered.text, /0\.0000013 \$/);
+  assert.ok(rendered.keyboard.inline_keyboard.flat().some((button) => button.text.includes("0.0013 $")));
+});
+
+test("tiny SMS supplier costs survive catalog normalization for checkout", async () => {
+  const harness = smsHarness(prices(Date.now(), 0.0000004));
+  const catalog = await harness.service.getGrizzlyVirtualNumberCatalog("WhatsApp", { providerKey: "server1", cachedOnly: true });
+  assert.equal(catalog.countries[0].supplierPriceUsd, 0.0000004);
+  assert.equal(catalog.countries[0].sellPrice, 1);
+});
+
+test("legacy number menu labels supplier USD honestly and formats the selected wallet", async () => {
+  const country = { id: "187", name_ar: "أمريكا", name_en: "United States", flag: "🇺🇸", supplierPrice: 0.5, supplierPriceUsd: 0.5, sellPrice: 15, availableCount: 10 };
+  let rendered;
+  const menus = evaluateService("serviceMenusService.js", {
+    "./grizzlyService": {
+      getGrizzlyVirtualNumberCatalog: async () => ({ serviceCode: "wa", countries: [country] }),
+      paginateVirtualNumberCountries: (countries) => ({ items: countries, pageIndex: 0, totalPages: 1, totalItems: countries.length }),
+    },
+    "./profileService": { sendOrEditMessage: async (bot, chatId, text, keyboard) => { rendered = { text, keyboard }; } },
+  });
+  const user = { userId: 101, language: "ar", currency: "USD" };
+  await menus.sendVirtualNumberCountryDetails({}, 101, user, "WhatsApp", "187", 0);
+  assert.equal((rendered.text.match(/0\.50 \$/g) || []).length, 2);
+  assert.doesNotMatch(rendered.text, /RUB|₽/);
+  await menus.sendVirtualNumbersCountriesMenu({}, 101, user, "WhatsApp", 0);
+  assert.ok(rendered.keyboard.inline_keyboard.flat().some((button) => button.text.includes("0.50 $")));
+});
+
+test("a failed provider cancellation restores an active order for a later retry", async () => {
+  const { AppStore } = require("../src/services/appStore");
+  const store = Object.create(AppStore.prototype);
+  store.users = [store.normalizeUser({ userId: 101, currency: "USD", balances: { USD: 9 }, language: "ar", isVerified: true })];
+  store.transactions = [{ id: "purchase", type: "virtual_number_purchase", activationId: "act", providerKey: "server1", userId: 101, amount: 30, walletCurrency: "USD", status: "active" }];
+  store.config = { services: {}, botStats: {} };
+  store.persistAll = () => {};
+  const harness = smsHarness({});
+  const flow = evaluateService("virtualNumbersFlowService.js", {
+    ...harness.dependencies, "./grizzlyService": { ...harness.service, cancelNumber: async () => null },
+    "./stateStore": { getUserState: () => null, setUserState() {}, clearUserState() {} },
+  });
+  const bot = { answerCallbackQuery: async () => ({}), editMessageText: async () => ({}) };
+  await flow.handleVirtualNumbersCallback(bot, { id: "cancel", data: "vnm:cancel:server1:act:30", from: { id: 101 }, message: { chat: { id: 101 }, message_id: 5 } }, store);
+  assert.equal(store.transactions[0].status, "active");
+  assert.equal(store.getBalance(101, "USD"), 9);
 });

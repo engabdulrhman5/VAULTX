@@ -29,7 +29,23 @@ const { getUserLang, getArray, t } = require("../locales");
 const { escapeHtml, formatRuble } = require("../utils/formatters");
 const { getUserState, setUserState, clearUserState } = require("./stateStore");
 const { buildVaultxServiceCard } = require("../utils/serviceHeroCards");
+const { formatCurrency, formatUsd, formatAmount, rubToCurrency } = require("./currencyService");
 const socialBoostOrdersInFlight = new Set();
+function walletBalanceText(amountRub, currency) { return formatAmount(rubToCurrency(amountRub, currency), currency, { decimals: 6 }); }
+
+function formatVirtualCountryButtons(keyboard, countries, currency, lang) {
+  const byId = new Map(countries.map((country) => [String(country.id), country]));
+  for (const row of keyboard.inline_keyboard || []) {
+    for (const button of row) {
+      if (!String(button.callback_data || "").startsWith("service_menu:virtual_numbers:country:")) continue;
+      const country = byId.get(button.callback_data.split(":")[4]);
+      if (!country) continue;
+      const name = lang === "ar" ? country.name_ar : country.name_en || country.name_ar;
+      button.text = `${country.flag} ${name} — ${formatCurrency(country.sellPrice, currency)}`;
+    }
+  }
+  return keyboard;
+}
 
 function buildCard(frame, title, lines, footer) {
   return [
@@ -92,7 +108,7 @@ async function sendVirtualNumbersOffersMenu(bot, chatId, user, offerKey, options
   }));
 
   const cheapest = entries.sort((a, b) => a.finalPrice - b.finalPrice).slice(0, 6);
-  const text = [`📈 <b>${t(lang, "virtualNumbers_offers_title").replace("{app}", appName)}</b>`, "", ...cheapest.map((item) => `${item.flag} ${item.countryName} — ${item.finalPrice} RUB — ${t(lang, item.providerKey === "server1" ? "virtualNumbers_server1" : "virtualNumbers_server2")}`)].join("\n");
+  const text = [`📈 <b>${t(lang, "virtualNumbers_offers_title").replace("{app}", appName)}</b>`, "", ...cheapest.map((item) => `${item.flag} ${item.countryName} — ${formatCurrency(item.finalPrice, user.currency)} — ${t(lang, item.providerKey === "server1" ? "virtualNumbers_server1" : "virtualNumbers_server2")}`)].join("\n");
   return sendOrEditMessage(bot, chatId, text || t(lang, "virtualNumbers_offer_empty"), { inline_keyboard: [[{ text: t(lang, "common_back"), callback_data: "service:virtual_numbers" }]] }, options.messageId, "sendVirtualNumbersOffersMenu");
 }
 
@@ -122,7 +138,7 @@ function buildVirtualNumbersCountriesText(lang, appName, countriesPage) {
   return lines.join("\n");
 }
 
-function buildVirtualNumberCountryDetailsText(lang, appName, country) {
+function buildVirtualNumberCountryDetailsText(lang, appName, country, currency = "USD") {
   const countryLabel = lang === "ar" ? country.name_ar : t(lang, `grizzly_country_${country.id}`) || country.name_ar;
   return [
     `📱 <b>${t(lang, "grizzly_selected_title")}</b>`,
@@ -130,8 +146,8 @@ function buildVirtualNumberCountryDetailsText(lang, appName, country) {
     `${t(lang, "grizzly_service_label")} : <b>${escapeHtml(appName)}</b>`,
     `${t(lang, "grizzly_label_country")} : ${country.flag} ${escapeHtml(countryLabel)}`,
     `${t(lang, "grizzly_label_stock")} : <b>${country.availableCount}</b>`,
-    `${t(lang, "grizzly_label_supplier")} : <code>${country.supplierPrice} RUB</code>`,
-    `${t(lang, "grizzly_label_final_price")} : <code>${country.sellPrice} RUB</code>`,
+    `${t(lang, "grizzly_label_supplier")} : <code>${formatUsd(country.supplierPriceUsd ?? country.supplierPrice, currency)}</code>`,
+    `${t(lang, "grizzly_label_final_price")} : <code>${formatCurrency(country.sellPrice, currency)}</code>`,
     "",
     t(lang, "grizzly_selected_note"),
   ].join("\n");
@@ -158,7 +174,8 @@ async function sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageI
     }
 
     const countriesPage = paginateVirtualNumberCountries(catalog.countries, pageIndex);
-    return sendOrEditMessage(bot, chatId, buildVirtualNumbersCountriesText(lang, appName, countriesPage), getVirtualNumbersCountriesKeyboard(appName, countriesPage.items, countriesPage.pageIndex, countriesPage.totalPages, lang), options.messageId, "sendVirtualNumbersCountriesMenu");
+    const keyboard = formatVirtualCountryButtons(getVirtualNumbersCountriesKeyboard(appName, countriesPage.items, countriesPage.pageIndex, countriesPage.totalPages, lang), countriesPage.items, user.currency, lang);
+    return sendOrEditMessage(bot, chatId, buildVirtualNumbersCountriesText(lang, appName, countriesPage), keyboard, options.messageId, "sendVirtualNumbersCountriesMenu");
   } catch (error) {
     logBotError("sendVirtualNumbersCountriesMenu", error, { appName, userId: user?.userId });
     const errorText = lang === "ar"
@@ -179,7 +196,7 @@ async function sendVirtualNumberCountryDetails(bot, chatId, user, appName, count
       return sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageIndex, options);
     }
 
-    return sendOrEditMessage(bot, chatId, buildVirtualNumberCountryDetailsText(lang, appName, country), getVirtualNumberCountryDetailsKeyboard(appName, country.id, pageIndex, lang), options.messageId, "sendVirtualNumberCountryDetails");
+    return sendOrEditMessage(bot, chatId, buildVirtualNumberCountryDetailsText(lang, appName, country, user.currency), getVirtualNumberCountryDetailsKeyboard(appName, country.id, pageIndex, lang), options.messageId, "sendVirtualNumberCountryDetails");
   } catch (error) {
     logBotError("sendVirtualNumberCountryDetails", error, { appName, countryId, userId: user?.userId });
     return sendVirtualNumbersCountriesMenu(bot, chatId, user, appName, pageIndex, options);
@@ -364,11 +381,11 @@ async function sendSocialBoostServicesMenu(bot, chatId, user, platformKey, categ
     if (!serviceInfo || !cached) return null;
 
     const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
-    const unitPrice = cached.pricePerUnitRubFormatted || (Number.isFinite(cached.pricePerUnitRub) ? Number(cached.pricePerUnitRub).toFixed(4) : null);
+    const unitPrice = Number.isFinite(cached.pricePerUnitRub) && cached.pricePerUnitRub > 0 ? formatCurrency(cached.pricePerUnitRub, user.currency) : null;
     if (!unitPrice) return null;
 
     return {
-      text: `🟢 ${serviceName} < ( ${unitPrice} ₽ )`,
+      text: `🟢 ${serviceName} < ( ${unitPrice} )`,
       callback_data: `service_menu:social_boost:service:${platformKey}:${categoryKey}:${service.id}`,
     };
   }).filter(Boolean);
@@ -405,12 +422,12 @@ async function sendSocialBoostServiceDetails(bot, chatId, user, platformKey, cat
   }
 
   const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
-  const pricePer1000 = cached.pricePer1000RubFormatted
-    || (Number.isFinite(cached.pricePer1000Rub) ? Number(cached.pricePer1000Rub).toFixed(4) : getSocialBoostFallback(lang, "socialBoost_unknown"));
+  const pricePer1000 = Number.isFinite(cached.pricePer1000Rub) && cached.pricePer1000Rub > 0
+    ? formatCurrency(cached.pricePer1000Rub, user.currency) : getSocialBoostFallback(lang, "socialBoost_unknown");
   const unitPriceValue = Number(cached?.pricePerUnitRub || 0);
   const pricePerOne = Number.isFinite(unitPriceValue) && unitPriceValue > 0
-    ? `${unitPriceValue.toFixed(4)} ₽`
-    : "0.0000 ₽";
+    ? formatCurrency(unitPriceValue, user.currency)
+    : getSocialBoostFallback(lang, "socialBoost_unknown");
   const qualityLabel = getSocialBoostQuality(lang, cached);
   const minValue = Number(cached?.min || 0) || 0;
   const detailRows = [
@@ -548,7 +565,12 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
       const min = Number(cached?.min || 10) || 10;
       const max = Number(cached?.max || 100000) || 100000;
       const unitPriceNum = Number(cached?.pricePerUnitRub || 0);
-      const unitPrice = Number.isFinite(unitPriceNum) && unitPriceNum > 0 ? unitPriceNum.toFixed(4) : "0.0000";
+      if (!cached || !Number.isFinite(unitPriceNum) || unitPriceNum <= 0) {
+        clearUserState(user.userId);
+        await safeTelegramCall("handleSocialBoostTextInput.unavailablePrice", () => bot.sendMessage(msg.chat.id, lang === "ar" ? "لا يوجد سعر حديث لهذه الخدمة الآن. أعد المحاولة بعد تحديث القائمة." : "No current price is available. Retry after the list refreshes."));
+        return true;
+      }
+      const unitPrice = formatCurrency(unitPriceNum, user.currency);
 
       setUserState(user.userId, "SMM_AWAIT_QUANTITY", {
         platformKey: state.platformKey,
@@ -598,10 +620,10 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
       }
 
       const unitPrice = Number(cached.pricePerUnitRub || 0);
-      const total = Number((unitPrice * quantity).toFixed(4));
+      const total = Number((unitPrice * quantity).toPrecision(12));
       const currentUser = appStore.findUserById(user.userId);
       const currentBalance = Number(currentUser?.balance || 0);
-      const afterBalance = Number((currentBalance - total).toFixed(4));
+      const afterBalance = currentBalance - total;
       const serviceName = getSocialBoostServiceName(lang, serviceInfo, cached);
       const refill = getSocialBoostRefill(lang, cached);
 
@@ -614,9 +636,9 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
               link: state.link,
               quantity,
               refill,
-              total: formatRuble(total),
-              currentBalance: formatRuble(currentBalance),
-              afterBalance: formatRuble(afterBalance),
+              total: formatRuble(total, currentUser.currency),
+              currentBalance: walletBalanceText(currentBalance, currentUser.currency),
+              afterBalance: walletBalanceText(afterBalance, currentUser.currency),
               statusLine: lang === "ar" ? "❌ للأسف لا يوجد لديك رصيد كافي 🥺" : "❌ Insufficient balance",
             }),
             {
@@ -637,6 +659,7 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
       }
       const reservation = appStore.reservePurchase(user.userId, total, { type: "social_boost_order", serviceKey: "social_boost", platformKey: state.platformKey, categoryKey: state.categoryKey, serviceId: String(state.serviceId), link: state.link, quantity });
       if (!reservation) return true;
+      const walletCurrency = reservation.walletCurrency;
       const order = await createSmmOrder({
         serviceId: state.serviceId,
         link: state.link,
@@ -661,12 +684,13 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
               link: state.link,
               quantity,
               refill,
-              total: formatRuble(total),
-              currentBalance: formatRuble(currentBalance),
-              afterBalance: formatRuble(currentBalance),
+              total: formatRuble(total, walletCurrency),
+              currentBalance: walletBalanceText(currentBalance, walletCurrency),
+              afterBalance: walletBalanceText(currentBalance, walletCurrency),
               statusLine: lang === "ar" ? "❌ فشل تنفيذ العملية من المزود، حاول مرة أخرى." : "❌ Provider failed to place order.",
             }),
             {
+              vaultx_preserve_currency: true,
               reply_markup: {
                 inline_keyboard: [[{ text: lang === "ar" ? "- الغاء" : "- Cancel", callback_data: "social_boost:cancel" }]],
               },
@@ -682,7 +706,6 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
         providerOrderId: String(order.orderId || ""),
       });
 
-      const updated = appStore.findUserById(user.userId);
       clearUserState(user.userId);
 
       await safeTelegramCall("handleSocialBoostTextInput.success", () =>
@@ -693,14 +716,15 @@ async function handleSocialBoostTextInputUnlocked(bot, msg, appStore) {
             link: state.link,
             quantity,
             refill,
-            total: formatRuble(total),
-            currentBalance: formatRuble(currentBalance),
-            afterBalance: formatRuble(updated?.balance || 0),
+            total: formatRuble(total, walletCurrency),
+            currentBalance: walletBalanceText(currentBalance, walletCurrency),
+            afterBalance: formatAmount(appStore.getBalance(user.userId, walletCurrency), walletCurrency, { decimals: 6 }),
             statusLine: lang === "ar"
               ? `✅ تم تنفيذ العملية بنجاح | رقم الطلب: ${order.orderId}`
               : `✅ Order placed successfully | ID: ${order.orderId}`,
           }),
           {
+            vaultx_preserve_currency: true,
             reply_markup: {
               inline_keyboard: [[{ text: lang === "ar" ? "- الصفحة الرئيسية" : "- Main Page", callback_data: "menu:main" }]],
             },
